@@ -53,3 +53,23 @@ mutation ReorderProductImages($productId: ID!, $moves: [MoveInput!]!) {
     }
 }
 """
+
+STAGED_UPLOADS_CREATE_MUTATION = """
+mutation StagedUploadsCreate($input: [StagedUploadInput!]!) {
+    stagedUploadsCreate(input: $input) {
+        stagedTargets {
+            url
+            resourceUrl
+            parameters {
+                name
+                value
+            }
+        }
+        userErrors {
+            field
+            message
+        }
+    }
+}
+"""
+

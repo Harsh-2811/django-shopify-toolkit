@@ -2,9 +2,68 @@
 
 All notable changes to this project are documented in this file.
 
-## [0.1.0] - Unreleased
+## [1.1.0] - Unreleased
 
-Initial release.
+### Added
+- `shopify_toolkit.signals.webhook_received` — dispatched after a webhook
+  is verified and saved, so consumers can react with `@receiver(...)`
+  anywhere in their project instead of polling `WebhookEvent`.
+- `iter_all_products`/`iter_all_orders`/`iter_all_customers` — generators
+  that fetch subsequent pages automatically, for consumers who don't want
+  to manage `has_next_page`/`end_cursor` by hand.
+- `shopify_toolkit.testing` (new `[testing]` extra) — `mock_shopify_api`/
+  `mock_shopify_error` helpers for consumers' own test suites, usable as
+  either a context manager or a decorator.
+- `shopify_toolkit.bulk_operations` — `run_bulk_query`/
+  `get_current_bulk_operation`/`wait_for_bulk_operation`/
+  `download_bulk_operation_result`, wrapping Shopify's async bulk query API
+  for datasets too large for paginated GraphQL. Added to CLAUDE.md's scope
+  lock with explicit sign-off — read-only bulk queries, not bulk mutations.
+- Product variants and options: `Product.options`/`Product.variants` now
+  parse automatically; `list_product_variants`/`get_product_variant`/
+  `create_product_variant`/`update_product_variant`/`bulk_create_variants`/
+  `bulk_update_variants`/`delete_product_variants`/`create_product_option`/
+  `update_product_option`/`delete_product_option`. Built on
+  `productVariantsBulkCreate`/`productVariantsBulkUpdate`/
+  `productVariantsBulkDelete` throughout — including for single-variant
+  updates — since Shopify deprecated the singular `productVariantCreate`/
+  `productVariantUpdate`/`productVariantDelete` mutations in API version
+  2024-10, which is itself no longer a supported version.
+- `upload_product_image_file` — uploads a local file (path, Django
+  `UploadedFile`, or any file-like object) directly to Shopify via the
+  Staged Uploads API, instead of requiring a public URL like
+  `add_product_image`.
+- `Literal` type hints for `Product`'s `status=` kwarg
+  (`create_product`/`update_product`) — IDE autocomplete, works exactly
+  like any other field.
+- Bounded, LRU-evicted session pool (`SHOPIFY_TOOLKIT_MAX_POOLED_SESSIONS`,
+  default 500) — the pool no longer grows unbounded in deployments managing
+  thousands of stores; least-recently-used sessions are closed and dropped.
+
+### Fixed
+- `SHOPIFY_TOOLKIT_API_VERSION`/`ShopifyStore.api_version` default bumped
+  from `2025-01` (already expired — Shopify supports each version for only
+  ~12 months) to `2026-07` (current, verified live against a real store).
+  Folded into `migrations/0001_initial.py` directly rather than a separate
+  migration, since nothing had shipped to real PyPI yet.
+- `upload_product_image_file` used `resource: "PRODUCT_IMAGE"` for the
+  staged upload target — deprecated, tied to the classic ProductImage API
+  this package already moved away from. Fixed to `"IMAGE"`, the current
+  value for anything attached via `productCreateMedia`.
+- `create_product_option`/`update_product_option` no longer fabricate a
+  fake `ProductOption(id="", ...)` when Shopify's response doesn't contain
+  a matching option — they raise `ShopifyUserError` instead, consistent
+  with how the rest of this package treats unexpected response shapes.
+
+## [1.0.0]
+
+Published to TestPyPI directly (outside this session's tracked work), so
+this entry is a placeholder rather than a full itemized list — see the
+1.1.0 entry above for everything added since.
+
+## [0.1.0]
+
+Initial release — published to TestPyPI.
 
 ### Added
 - `ShopifyStore` and `WebhookEvent` models, with encrypted token fields and

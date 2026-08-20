@@ -1,7 +1,6 @@
-"""GraphQL query strings for the Products area.
+"""GraphQL query strings for the Products, Options, and Variants area.
 
-Scope-locked per CLAUDE.md: list products, get single product. Creation,
-update, and delete live in mutations.py.
+Scope: list products, get single product, list variants, get single variant.
 """
 
 PRODUCT_FIELDS_FRAGMENT = """
@@ -16,7 +15,45 @@ fragment ProductFields on Product {
     tags
     createdAt
     updatedAt
-    images(first: 20) {
+    options {
+        id
+        name
+        position
+        values
+    }
+    variants(first: 100) {
+        edges {
+            cursor
+            node {
+                id
+                title
+                price
+                compareAtPrice
+                sku
+                barcode
+                availableForSale
+                inventoryQuantity
+                inventoryItem {
+                    id
+                    tracked
+                }
+                selectedOptions {
+                    name
+                    value
+                }
+                image {
+                    id
+                    url
+                    altText
+                }
+                weight
+                weightUnit
+                requiresShipping
+                taxable
+            }
+        }
+    }
+    images(first: 50) {
         edges {
             node {
                 id
@@ -58,3 +95,83 @@ query GetProduct($id: ID!) {
 }
 """
 )
+
+LIST_PRODUCT_VARIANTS_QUERY = """
+query ListProductVariants($id: ID!, $first: Int!, $after: String) {
+    product(id: $id) {
+        variants(first: $first, after: $after) {
+            edges {
+                cursor
+                node {
+                    id
+                    title
+                    price
+                    compareAtPrice
+                    sku
+                    barcode
+                    availableForSale
+                    inventoryQuantity
+                    inventoryItem {
+                        id
+                        tracked
+                    }
+                    selectedOptions {
+                        name
+                        value
+                    }
+                    image {
+                        id
+                        url
+                        altText
+                    }
+                    weight
+                    weightUnit
+                    requiresShipping
+                    taxable
+                }
+            }
+            pageInfo {
+                hasNextPage
+                endCursor
+            }
+        }
+    }
+}
+"""
+
+GET_PRODUCT_VARIANT_QUERY = """
+query GetProductVariant($id: ID!) {
+    node(id: $id) {
+        ... on ProductVariant {
+            id
+            title
+            price
+            compareAtPrice
+            sku
+            barcode
+            availableForSale
+            inventoryQuantity
+            inventoryItem {
+                id
+                tracked
+            }
+            selectedOptions {
+                name
+                value
+            }
+            image {
+                id
+                url
+                altText
+            }
+            weight
+            weightUnit
+            requiresShipping
+            taxable
+            product {
+                id
+            }
+        }
+    }
+}
+"""

@@ -2,6 +2,13 @@
 
 Not shipped to consumers — this is a throwaway project config used only by
 pytest-django (see DJANGO_SETTINGS_MODULE in pyproject.toml).
+
+Backed by Postgres, not SQLite — SQLite's SELECT ... FOR UPDATE is a
+documented no-op, so it can't exercise the row-locking that protects
+Client Credentials Grant token exchange from a "thundering herd" of
+concurrent requests (see auth.py). Needs a reachable Postgres instance;
+override the POSTGRES_* env vars below to point it at yours. Defaults match
+`docker run -e POSTGRES_PASSWORD=postgres -p 5432:5432 postgres:16-alpine`.
 """
 import os
 
@@ -9,24 +16,16 @@ SECRET_KEY = "test-secret-key-not-for-production"
 DEBUG = True
 USE_TZ = True
 
-if os.environ.get("DB_ENGINE") == "sqlite3" or os.environ.get("USE_SQLITE", "").lower() in ("1", "true", "yes"):
-    DATABASES = {
-        "default": {
-            "ENGINE": "django.db.backends.sqlite3",
-            "NAME": ":memory:",
-        }
+DATABASES = {
+    "default": {
+        "ENGINE": "django.db.backends.postgresql",
+        "NAME": os.environ.get("POSTGRES_DB", "postgres"),
+        "USER": os.environ.get("POSTGRES_USER", "postgres"),
+        "PASSWORD": os.environ.get("POSTGRES_PASSWORD", "postgres"),
+        "HOST": os.environ.get("POSTGRES_HOST", "localhost"),
+        "PORT": os.environ.get("POSTGRES_PORT", "5432"),
     }
-else:
-    DATABASES = {
-        "default": {
-            "ENGINE": os.environ.get("DB_ENGINE", "django.db.backends.postgresql"),
-            "NAME": os.environ.get("POSTGRES_DB", "postgres"),
-            "USER": os.environ.get("POSTGRES_USER", "postgres"),
-            "PASSWORD": os.environ.get("POSTGRES_PASSWORD", "postgres"),
-            "HOST": os.environ.get("POSTGRES_HOST", "localhost"),
-            "PORT": os.environ.get("POSTGRES_PORT", "5432"),
-        }
-    }
+}
 
 INSTALLED_APPS = [
     "django.contrib.contenttypes",
