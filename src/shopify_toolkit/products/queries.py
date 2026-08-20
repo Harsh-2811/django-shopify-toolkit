@@ -36,6 +36,13 @@ fragment ProductFields on Product {
                 inventoryItem {
                     id
                     tracked
+                    requiresShipping
+                    measurement {
+                        weight {
+                            unit
+                            value
+                        }
+                    }
                 }
                 selectedOptions {
                     name
@@ -46,9 +53,6 @@ fragment ProductFields on Product {
                     url
                     altText
                 }
-                weight
-                weightUnit
-                requiresShipping
                 taxable
             }
         }
@@ -114,6 +118,13 @@ query ListProductVariants($id: ID!, $first: Int!, $after: String) {
                     inventoryItem {
                         id
                         tracked
+                        requiresShipping
+                        measurement {
+                            weight {
+                                unit
+                                value
+                            }
+                        }
                     }
                     selectedOptions {
                         name
@@ -124,9 +135,6 @@ query ListProductVariants($id: ID!, $first: Int!, $after: String) {
                         url
                         altText
                     }
-                    weight
-                    weightUnit
-                    requiresShipping
                     taxable
                 }
             }

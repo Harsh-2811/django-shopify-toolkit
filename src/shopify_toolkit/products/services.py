@@ -112,6 +112,11 @@ def _parse_selected_option(node: dict) -> SelectedOption:
 def _parse_variant(node: dict, product_id: str | None = None) -> ProductVariant:
     img = node.get("image") or {}
     inv_item = node.get("inventoryItem") or {}
+    measurement = inv_item.get("measurement") or {}
+    weight_obj = measurement.get("weight") or {}
+    weight_val = weight_obj.get("value") if weight_obj.get("value") is not None else node.get("weight")
+    weight_unit = weight_obj.get("unit") or node.get("weightUnit")
+    requires_shipping = inv_item.get("requiresShipping") if "requiresShipping" in inv_item else node.get("requiresShipping", True)
     selected_options = [
         _parse_selected_option(opt) for opt in node.get("selectedOptions") or []
     ]
@@ -127,9 +132,9 @@ def _parse_variant(node: dict, product_id: str | None = None) -> ProductVariant:
         inventory_quantity=node.get("inventoryQuantity"),
         inventory_item_id=inv_item.get("id"),
         inventory_tracked=bool(inv_item.get("tracked", False)),
-        weight=float(node["weight"]) if node.get("weight") is not None else None,
-        weight_unit=node.get("weightUnit"),
-        requires_shipping=bool(node.get("requiresShipping", True)),
+        weight=float(weight_val) if weight_val is not None else None,
+        weight_unit=weight_unit,
+        requires_shipping=bool(requires_shipping),
         taxable=bool(node.get("taxable", True)),
         image_id=img.get("id"),
         image_url=img.get("url"),

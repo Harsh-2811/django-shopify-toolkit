@@ -72,6 +72,13 @@ mutation ProductVariantsBulkCreate($productId: ID!, $variants: [ProductVariantsB
             inventoryItem {
                 id
                 tracked
+                requiresShipping
+                measurement {
+                    weight {
+                        unit
+                        value
+                    }
+                }
             }
             selectedOptions {
                 name
@@ -82,9 +89,6 @@ mutation ProductVariantsBulkCreate($productId: ID!, $variants: [ProductVariantsB
                 url
                 altText
             }
-            weight
-            weightUnit
-            requiresShipping
             taxable
         }
         userErrors {
@@ -110,6 +114,13 @@ mutation ProductVariantsBulkUpdate($productId: ID!, $variants: [ProductVariantsB
             inventoryItem {
                 id
                 tracked
+                requiresShipping
+                measurement {
+                    weight {
+                        unit
+                        value
+                    }
+                }
             }
             selectedOptions {
                 name
@@ -120,9 +131,6 @@ mutation ProductVariantsBulkUpdate($productId: ID!, $variants: [ProductVariantsB
                 url
                 altText
             }
-            weight
-            weightUnit
-            requiresShipping
             taxable
         }
         userErrors {

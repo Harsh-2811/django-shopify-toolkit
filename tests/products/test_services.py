@@ -47,12 +47,19 @@ def _sample_variant_node(
         "barcode": barcode,
         "availableForSale": True,
         "inventoryQuantity": inventory_qty,
-        "inventoryItem": {"id": "gid://shopify/InventoryItem/501", "tracked": True},
+        "inventoryItem": {
+            "id": "gid://shopify/InventoryItem/501",
+            "tracked": True,
+            "requiresShipping": True,
+            "measurement": {
+                "weight": {
+                    "value": weight,
+                    "unit": weight_unit,
+                }
+            },
+        },
         "selectedOptions": selected_options,
         "image": {"id": "gid://shopify/MediaImage/901", "url": "https://cdn.example/black_shoe.png", "altText": "Black Shoe"},
-        "weight": weight,
-        "weightUnit": weight_unit,
-        "requiresShipping": True,
         "taxable": True,
     }
 
@@ -479,3 +486,23 @@ def test_delete_product_success(shopify_store):
     )
     deleted_id = services.delete_product(shopify_store, PRODUCT_ID)
     assert deleted_id == PRODUCT_ID
+
+
+def test_parse_variant_legacy_fallback_fields():
+    legacy_node = {
+        "id": "gid://shopify/ProductVariant/999",
+        "title": "Legacy Item",
+        "price": "50.00",
+        "availableForSale": True,
+        "inventoryQuantity": 10,
+        "inventoryItem": {"id": "gid://shopify/InventoryItem/999", "tracked": True},
+        "selectedOptions": [],
+        "weight": 2.5,
+        "weightUnit": "POUNDS",
+        "requiresShipping": False,
+        "taxable": True,
+    }
+    variant = services._parse_variant(legacy_node)
+    assert variant.weight == 2.5
+    assert variant.weight_unit == "POUNDS"
+    assert variant.requires_shipping is False
