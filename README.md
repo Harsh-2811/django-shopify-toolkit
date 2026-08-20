@@ -46,30 +46,54 @@ pip install django-shopify-toolkit[testing]
 
 ## Quick Start
 
-### 1. Configure `settings.py`
+### 1. Environment Variables (`.env`)
 
-Add `shopify_toolkit` and `encrypted_model_fields` to `INSTALLED_APPS`:
+Add the following to your project's `.env` file:
+
+```env
+# Required: 32-byte base64 key used to encrypt store access tokens in the database
+FIELD_ENCRYPTION_KEY="your-32-byte-base64-encryption-key"
+
+# Optional: Default Shopify App credentials
+SHOPIFY_API_VERSION="2026-01"
+SHOPIFY_CLIENT_ID="your_shopify_client_id"
+SHOPIFY_CLIENT_SECRET="your_shopify_client_secret"
+```
+
+> **Tip: Generate a valid 32-byte key in 1 command:**
+> ```bash
+> python -c "import os, base64; print(base64.b64encode(os.urandom(32)).decode())"
+> ```
+
+---
+
+### 2. Configure `settings.py`
+
+Add `shopify_toolkit` to `INSTALLED_APPS` and define the configuration dictionary:
 
 ```python
+import os
+
 INSTALLED_APPS = [
     ...,
-    "encrypted_model_fields",
     "shopify_toolkit",
 ]
 
-# 32-byte base64-encoded key used to encrypt store access tokens in the database
-FIELD_ENCRYPTION_KEY = os.environ.get("FIELD_ENCRYPTION_KEY", "your-32-byte-base64-key")
+# Key for encrypting access tokens (reads from .env)
+FIELD_ENCRYPTION_KEY = os.environ.get("FIELD_ENCRYPTION_KEY", "")
 
 SHOPIFY_TOOLKIT = {
-    "API_VERSION": "2026-01",  # "2025-10", "2025-07", "2024-07", etc.
-    "APP_TYPE": "custom",       # "custom" (private app) or "public" (OAuth)
+    "API_VERSION": os.environ.get("SHOPIFY_API_VERSION", "2026-01"),
+    "APP_TYPE": "custom",  # "custom" (private app) or "public" (OAuth)
     "CLIENT_ID": os.environ.get("SHOPIFY_CLIENT_ID", ""),
     "CLIENT_SECRET": os.environ.get("SHOPIFY_CLIENT_SECRET", ""),
     "SCOPES": ["read_products", "write_products", "read_orders", "write_orders", "read_customers"],
 }
 ```
 
-### 2. Run Migrations
+---
+
+### 3. Run Migrations
 
 ```bash
 python manage.py migrate
