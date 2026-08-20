@@ -5,15 +5,22 @@ mutations.py for the exact mutations used.
 """
 from __future__ import annotations
 
+import mimetypes
+import os
 from dataclasses import dataclass
+from typing import BinaryIO
+
+import requests
 
 from ..client import ShopifyGraphQLClient
+from ..conf import get_request_timeout
 from ..exceptions import ShopifyUserError
 from ..models import ShopifyStore
 from .mutations import (
     ADD_PRODUCT_IMAGE_MUTATION,
     REMOVE_PRODUCT_IMAGE_MUTATION,
     REORDER_PRODUCT_IMAGES_MUTATION,
+    STAGED_UPLOADS_CREATE_MUTATION,
 )
 from .queries import LIST_PRODUCT_IMAGES_QUERY
 
@@ -99,3 +106,79 @@ def reorder_product_images(store: ShopifyStore, product_id: str, image_ids_in_or
     )
     result = data["productReorderMedia"]
     _raise_for_media_user_errors(result["mediaUserErrors"])
+
+
+def upload_product_image_file(
+    store: ShopifyStore,
+    product_id: str,
+    file_source: str | BinaryIO,
+    *,
+    filename: str | None = None,
+    alt_text: str | None = None,
+    content_type: str | None = None,
+) -> ProductImage:
+    """Upload a local binary image file directly to Shopify (no public URL
+    needed) using the Staged Uploads API, then attach it to a product.
+
+    Supports a file path (str), a Django UploadedFile, or any other
+    file-like object (e.g. io.BytesIO).
+    """
+    client = ShopifyGraphQLClient(store)
+
+    if isinstance(file_source, str):
+        if not os.path.exists(file_source):
+            raise FileNotFoundError(f"Image file not found: {file_source}")
+        fname = filename or os.path.basename(file_source)
+        file_size = os.path.getsize(file_source)
+        mime = content_type or mimetypes.guess_type(fname)[0] or "application/octet-stream"
+        with open(file_source, "rb") as f:
+            file_bytes = f.read()
+    else:
+        fname = filename or getattr(file_source, "name", "image.jpg")
+        file_bytes = file_source.read()
+        file_size = len(file_bytes)
+        mime = (
+            content_type
+            or getattr(file_source, "content_type", None)
+            or mimetypes.guess_type(fname)[0]
+            or "application/octet-stream"
+        )
+
+    # 1. Request a staged upload target from Shopify.
+    # resource="IMAGE", not "PRODUCT_IMAGE" — the latter is a deprecated
+    # value tied to the classic ProductImage API this module already moved
+    # away from (see queries.py's docstring). "IMAGE" is the current value
+    # for anything you'll attach via productCreateMedia — verified against
+    # shopify.dev's StagedUploadTargetGenerateUploadResource enum reference.
+    staged_input = {
+        "resource": "IMAGE",
+        "filename": fname,
+        "mimeType": mime,
+        "fileSize": str(file_size),
+        "httpMethod": "POST",
+    }
+    data = client.execute(STAGED_UPLOADS_CREATE_MUTATION, {"input": [staged_input]})
+    target_data = data.get("stagedUploadsCreate") or {}
+    _raise_for_media_user_errors(target_data.get("userErrors", []))
+
+    targets = target_data.get("stagedTargets") or []
+    if not targets:
+        raise ShopifyUserError("stagedUploadsCreate returned no stagedTargets", user_errors=[])
+
+    target = targets[0]
+    upload_url = target["url"]
+    resource_url = target["resourceUrl"]
+    params = target.get("parameters", [])
+
+    # 2. POST the raw bytes directly to Shopify's temporary storage target
+    # (Google Cloud Storage) — not a Shopify Admin API call, so it doesn't
+    # go through ShopifyGraphQLClient.
+    form_data = {p["name"]: p["value"] for p in params}
+    files = {"file": (fname, file_bytes, mime)}
+    response = requests.post(upload_url, data=form_data, files=files, timeout=get_request_timeout())
+    response.raise_for_status()
+
+    # 3. Attach the uploaded file to the product via the same Media API
+    # path as add_product_image().
+    return add_product_image(store, product_id, src=resource_url, alt_text=alt_text)
+
