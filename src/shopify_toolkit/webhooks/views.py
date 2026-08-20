@@ -13,6 +13,7 @@ from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_POST
 
 from ..models import ShopifyStore, WebhookEvent
+from ..signals import webhook_received
 from .verify import verify_webhook
 
 logger = logging.getLogger(__name__)
@@ -42,6 +43,7 @@ def receive_webhook(request: HttpRequest) -> HttpResponse:
     except ValueError:
         payload = {}
 
-    WebhookEvent.objects.create(store=store, topic=topic, payload=payload)
+    event = WebhookEvent.objects.create(store=store, topic=topic, payload=payload)
+    webhook_received.send(sender=WebhookEvent, store=store, topic=topic, payload=payload, event=event)
 
     return HttpResponse(status=200)

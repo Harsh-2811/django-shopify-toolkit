@@ -11,6 +11,18 @@ on:
 jobs:
   test:
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
     strategy:
       fail-fast: false
       matrix:
@@ -32,6 +44,10 @@ jobs:
           pip install -e ".[drf,dev]"
 
       - name: Run pytest
+        # `python -m pytest`, not bare `pytest` — the module form adds the
+        # repo root to sys.path early enough for pytest-django to import
+        # DJANGO_SETTINGS_MODULE ("tests.settings"). The bare `pytest`
+        # console script doesn't, and fails with "No module named 'tests'".
         run: python -m pytest --cov=shopify_toolkit --cov-report=term-missing
 
       - name: Check migrations are in sync with models

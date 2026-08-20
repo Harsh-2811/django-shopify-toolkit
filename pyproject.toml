@@ -39,19 +39,23 @@ dependencies = [
 drf = [
     "djangorestframework>=3.14",
 ]
+testing = [
+    "responses>=0.23",
+]
 dev = [
     "pytest>=7.0",
     "pytest-django>=4.5",
     "pytest-cov>=4.1",
     "responses>=0.23",
+    "psycopg2-binary>=2.9",
     "build",
     "twine",
 ]
 
 [project.urls]
-Homepage = "https://github.com/example/django-shopify-toolkit"
-Repository = "https://github.com/example/django-shopify-toolkit"
-Changelog = "https://github.com/example/django-shopify-toolkit/blob/main/CHANGELOG.md"
+Homepage = "https://github.com/Harsh-2811/django-shopify-toolkit"
+Repository = "https://github.com/Harsh-2811/django-shopify-toolkit"
+Changelog = "https://github.com/Harsh-2811/django-shopify-toolkit/blob/main/CHANGELOG.md"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/shopify_toolkit"]
@@ -60,3 +64,5 @@ packages = ["src/shopify_toolkit"]
 DJANGO_SETTINGS_MODULE = "tests.settings"
 python_files = ["test_*.py"]
 testpaths = ["tests"]
+pythonpath = [".", "src"]
+

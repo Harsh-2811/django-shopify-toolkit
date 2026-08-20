@@ -6,6 +6,7 @@ parsing.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Iterator
 
 from .._utils import camelize_keys
 from ..client import ShopifyGraphQLClient
@@ -73,6 +74,17 @@ def list_orders(store: ShopifyStore, *, first: int = 50, after: str | None = Non
         has_next_page=page_info["hasNextPage"],
         end_cursor=page_info.get("endCursor"),
     )
+
+
+def iter_all_orders(store: ShopifyStore, *, batch_size: int = 50) -> Iterator[Order]:
+    """Yield every order for a store, fetching subsequent pages automatically."""
+    after = None
+    while True:
+        page = list_orders(store, first=batch_size, after=after)
+        yield from page.orders
+        if not page.has_next_page:
+            return
+        after = page.end_cursor
 
 
 def get_order(store: ShopifyStore, order_id: str) -> Order | None:

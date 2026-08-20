@@ -158,3 +158,39 @@ def test_store_isolation_list_customers(shopify_store, other_shopify_store):
     call_a, call_b = responses.calls[0], responses.calls[1]
     assert call_a.request.headers["X-Shopify-Access-Token"] == "shpat_test_token_1"
     assert call_b.request.headers["X-Shopify-Access-Token"] == "shpat_test_token_2"
+
+
+@responses.activate
+@pytest.mark.django_db
+def test_iter_all_customers_fetches_every_page(shopify_store):
+    responses.add(
+        responses.POST,
+        ENDPOINT,
+        json={
+            "data": {
+                "customers": {
+                    "edges": [{"cursor": "c1", "node": _customer_node(id="gid://shopify/Customer/1")}],
+                    "pageInfo": {"hasNextPage": True, "endCursor": "c1"},
+                }
+            }
+        },
+        status=200,
+    )
+    responses.add(
+        responses.POST,
+        ENDPOINT,
+        json={
+            "data": {
+                "customers": {
+                    "edges": [{"cursor": "c2", "node": _customer_node(id="gid://shopify/Customer/2")}],
+                    "pageInfo": {"hasNextPage": False, "endCursor": "c2"},
+                }
+            }
+        },
+        status=200,
+    )
+
+    ids = [c.id for c in services.iter_all_customers(shopify_store, batch_size=1)]
+
+    assert ids == ["gid://shopify/Customer/1", "gid://shopify/Customer/2"]
+    assert len(responses.calls) == 2

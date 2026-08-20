@@ -7,11 +7,17 @@ directly. This keeps defaults and validation in exactly one place.
 from django.conf import settings
 from django.core.exceptions import ImproperlyConfigured
 
-DEFAULT_API_VERSION = "2025-01"
+# Shopify supports each stable API version for a minimum of 12 months, with
+# at least 9 months of overlap between consecutive quarterly releases. This
+# default must be bumped periodically or it silently expires — verified
+# against shopify.dev's versioning docs and confirmed working live against
+# a real store on 2026-08-20. Next bump needed before ~2027-07.
+DEFAULT_API_VERSION = "2026-07"
 DEFAULT_MAX_RETRIES = 3
 DEFAULT_RATE_LIMIT_BUFFER = 100
 DEFAULT_MAX_BACKOFF_SECONDS = 10
 DEFAULT_REQUEST_TIMEOUT = 30
+DEFAULT_MAX_POOLED_SESSIONS = 500
 
 
 def get_api_secret() -> str:
@@ -61,3 +67,12 @@ def get_max_backoff_seconds() -> float:
 def get_request_timeout() -> float:
     """Per-request timeout (seconds) for GraphQL calls and token exchanges."""
     return getattr(settings, "SHOPIFY_TOOLKIT_REQUEST_TIMEOUT", DEFAULT_REQUEST_TIMEOUT)
+
+
+def get_max_pooled_sessions() -> int:
+    """Max distinct store domains kept in client.py's session pool at once.
+
+    Bounds memory in high-tenant-count deployments — oldest-used sessions
+    are evicted (and closed) once this is exceeded.
+    """
+    return getattr(settings, "SHOPIFY_TOOLKIT_MAX_POOLED_SESSIONS", DEFAULT_MAX_POOLED_SESSIONS)

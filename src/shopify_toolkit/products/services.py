@@ -7,6 +7,7 @@ directly.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from typing import Iterator, Literal
 
 from .._utils import camelize_keys
 from ..client import ShopifyGraphQLClient
@@ -14,6 +15,11 @@ from ..exceptions import ShopifyUserError
 from ..models import ShopifyStore
 from .mutations import CREATE_PRODUCT_MUTATION, DELETE_PRODUCT_MUTATION, UPDATE_PRODUCT_MUTATION
 from .queries import GET_PRODUCT_QUERY, LIST_PRODUCTS_QUERY
+
+# For IDE autocomplete on create_product/update_product's status= kwarg —
+# Shopify's ProductStatus enum. Product.status itself stays a plain str
+# (Shopify's own response), since it's read, not chosen by the caller.
+ProductStatus = Literal["ACTIVE", "ARCHIVED", "DRAFT"]
 
 
 @dataclass
@@ -91,6 +97,21 @@ def list_products(store: ShopifyStore, *, first: int = 50, after: str | None = N
     )
 
 
+def iter_all_products(store: ShopifyStore, *, batch_size: int = 50) -> Iterator[Product]:
+    """Yield every product for a store, fetching subsequent pages automatically.
+
+    for product in iter_all_products(store):
+        ...
+    """
+    after = None
+    while True:
+        page = list_products(store, first=batch_size, after=after)
+        yield from page.products
+        if not page.has_next_page:
+            return
+        after = page.end_cursor
+
+
 def get_product(store: ShopifyStore, product_id: str) -> Product | None:
     """Fetch a single product by its GraphQL ID. Returns None if not found."""
     client = ShopifyGraphQLClient(store)
@@ -101,13 +122,19 @@ def get_product(store: ShopifyStore, product_id: str) -> Product | None:
     return _parse_product(node)
 
 
-def create_product(store: ShopifyStore, *, title: str, **fields) -> Product:
+def create_product(
+    store: ShopifyStore, *, title: str, status: ProductStatus | None = None, **fields
+) -> Product:
     """Create a product. Raises ShopifyUserError on Shopify-side validation failure.
 
     Extra fields are forwarded to Shopify's ProductInput — either
     Pythonic snake_case (product_type=...) or Shopify's native camelCase
     (productType=...) both work, snake_case is converted automatically.
+    `status` is called out explicitly just for IDE autocomplete/validation;
+    it works exactly the same as any other field passed through **fields.
     """
+    if status is not None:
+        fields["status"] = status
     client = ShopifyGraphQLClient(store)
     input_payload = camelize_keys({"title": title, **fields})
     data = client.execute(CREATE_PRODUCT_MUTATION, {"input": input_payload})
@@ -116,12 +143,16 @@ def create_product(store: ShopifyStore, *, title: str, **fields) -> Product:
     return _parse_product(result["product"])
 
 
-def update_product(store: ShopifyStore, *, product_id: str, **fields) -> Product:
+def update_product(
+    store: ShopifyStore, *, product_id: str, status: ProductStatus | None = None, **fields
+) -> Product:
     """Update (edit) a product. Raises ShopifyUserError on validation failure.
 
     Extra fields are forwarded to Shopify's ProductInput — either
     Pythonic snake_case or Shopify's native camelCase both work.
     """
+    if status is not None:
+        fields["status"] = status
     client = ShopifyGraphQLClient(store)
     input_payload = camelize_keys({"id": product_id, **fields})
     data = client.execute(UPDATE_PRODUCT_MUTATION, {"input": input_payload})

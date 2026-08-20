@@ -204,3 +204,64 @@ def test_store_isolation_list_products(shopify_store, other_shopify_store):
     assert call_b.request.url == OTHER_ENDPOINT
     assert call_a.request.headers["X-Shopify-Access-Token"] == "shpat_test_token_1"
     assert call_b.request.headers["X-Shopify-Access-Token"] == "shpat_test_token_2"
+
+
+@responses.activate
+@pytest.mark.django_db
+def test_iter_all_products_fetches_every_page(shopify_store):
+    responses.add(
+        responses.POST,
+        ENDPOINT,
+        json={
+            "data": {
+                "products": {
+                    "edges": [{"cursor": "c1", "node": _product_node(id="gid://shopify/Product/1")}],
+                    "pageInfo": {"hasNextPage": True, "endCursor": "c1"},
+                }
+            }
+        },
+        status=200,
+    )
+    responses.add(
+        responses.POST,
+        ENDPOINT,
+        json={
+            "data": {
+                "products": {
+                    "edges": [{"cursor": "c2", "node": _product_node(id="gid://shopify/Product/2")}],
+                    "pageInfo": {"hasNextPage": False, "endCursor": "c2"},
+                }
+            }
+        },
+        status=200,
+    )
+
+    ids = [p.id for p in services.iter_all_products(shopify_store, batch_size=1)]
+
+    assert ids == ["gid://shopify/Product/1", "gid://shopify/Product/2"]
+    assert len(responses.calls) == 2
+
+
+@responses.activate
+@pytest.mark.django_db
+def test_create_product_accepts_status_kwarg(shopify_store):
+    responses.add(
+        responses.POST,
+        ENDPOINT,
+        json={
+            "data": {
+                "productCreate": {
+                    "product": _product_node(status="DRAFT"),
+                    "userErrors": [],
+                }
+            }
+        },
+        status=200,
+    )
+    product = services.create_product(shopify_store, title="New Product", status="DRAFT")
+
+    assert product.status == "DRAFT"
+    import json
+
+    sent_body = json.loads(responses.calls[0].request.body)
+    assert sent_body["variables"]["input"]["status"] == "DRAFT"
