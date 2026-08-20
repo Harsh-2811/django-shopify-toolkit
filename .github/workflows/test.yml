@@ -32,7 +32,7 @@ jobs:
           pip install -e ".[drf,dev]"
 
       - name: Run pytest
-        run: pytest --cov=shopify_toolkit --cov-report=term-missing
+        run: python -m pytest --cov=shopify_toolkit --cov-report=term-missing
 
       - name: Check migrations are in sync with models
         run: |

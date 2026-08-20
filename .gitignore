@@ -33,12 +33,12 @@ staticfiles/
 .env
 .env.*
 
-# Local hardcoded demo script — has real store credentials pasted into it,
-# never meant to be pushed
+
 demo.py
 
-# Personal/local files not meant for the repo
-kling_20260818_IMAGE_Flat_vecto_5393_0.png
+
+django-sample/
+.venv/
 
 # Editors / IDEs
 .vscode/
