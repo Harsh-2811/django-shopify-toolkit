@@ -1,0 +1,187 @@
+"""Store-scoped Shopify Admin GraphQL client.
+
+Per CLAUDE.md principles #2 and #7: every client is built from an explicit
+ShopifyStore instance, so store A's token can never leak into store B's
+request. Rate-limit awareness (reading extensions.cost.throttleStatus) is
+built in here, not bolted on later.
+"""
+from __future__ import annotations
+
+import logging
+import threading
+import time
+from typing import Any
+
+import requests
+
+from .auth import get_access_token
+from .conf import (
+    get_max_backoff_seconds,
+    get_max_retries,
+    get_rate_limit_buffer,
+    get_request_timeout,
+)
+from .exceptions import ShopifyGraphQLError, ShopifyRateLimitError, ShopifyRequestError
+from .models import ShopifyStore
+
+logger = logging.getLogger(__name__)
+
+# A connection-pooled requests.Session per shop domain, reused across
+# ShopifyGraphQLClient instances so repeat calls to the same store don't
+# each pay a fresh TCP/TLS handshake. This is safe under CLAUDE.md
+# principle #2 despite being module-level state: no store-specific secret
+# is ever stored ON a Session (the access token is passed per-request via
+# the `headers=` kwarg in execute(), never via session.headers), and each
+# store's pool is kept strictly separate by domain key, so no store's
+# connections/state can cross into another's request.
+_session_pool: dict[str, requests.Session] = {}
+_session_pool_lock = threading.Lock()
+
+
+def _get_pooled_session(shop_domain: str) -> requests.Session:
+    session = _session_pool.get(shop_domain)
+    if session is None:
+        with _session_pool_lock:
+            session = _session_pool.get(shop_domain)
+            if session is None:
+                session = requests.Session()
+                _session_pool[shop_domain] = session
+    return session
+
+
+class ShopifyGraphQLClient:
+    """A GraphQL client scoped to exactly one ShopifyStore.
+
+    Construct a fresh instance per store — never share a client or headers
+    across two ShopifyStore rows. (The underlying HTTP session *is* pooled
+    per store domain for connection reuse — see _get_pooled_session — but
+    that carries no per-store secrets and never crosses store boundaries.)
+    """
+
+    def __init__(self, store: ShopifyStore, *, session: requests.Session | None = None):
+        self.store = store
+        self.endpoint = (
+            f"https://{store.shop_domain}/admin/api/{store.api_version}/graphql.json"
+        )
+        self._session = session or _get_pooled_session(store.shop_domain)
+        self._max_retries = get_max_retries()
+        self._rate_limit_buffer = get_rate_limit_buffer()
+        self._max_backoff = get_max_backoff_seconds()
+        self._timeout = get_request_timeout()
+
+    def _headers(self) -> dict[str, str]:
+        # get_access_token() resolves a static access_token or transparently
+        # exchanges/refreshes one via the client credentials grant — see
+        # auth.py. Resolved per call (not cached on self) so a token
+        # refreshed mid-session is always picked up.
+        return {
+            "Content-Type": "application/json",
+            "X-Shopify-Access-Token": get_access_token(self.store),
+        }
+
+    def execute(self, query: str, variables: dict[str, Any] | None = None) -> dict[str, Any]:
+        """Execute a GraphQL query or mutation against this store.
+
+        Returns the "data" portion of a successful response. Raises
+        ShopifyGraphQLError if the response body has an "errors" array (and
+        it isn't a throttling error), ShopifyRateLimitError if the request
+        was throttled, and ShopifyRequestError if the transport itself fails
+        after all retries are exhausted.
+        """
+        payload = {"query": query, "variables": variables or {}}
+
+        attempt = 0
+        last_exc: Exception | None = None
+        while attempt <= self._max_retries:
+            try:
+                response = self._session.post(
+                    self.endpoint,
+                    json=payload,
+                    headers=self._headers(),
+                    timeout=self._timeout,
+                )
+            except requests.RequestException as exc:
+                last_exc = exc
+                attempt += 1
+                if attempt > self._max_retries:
+                    break
+                self._sleep_backoff(attempt)
+                continue
+
+            return self._handle_response(response)
+
+        raise ShopifyRequestError(
+            f"Request to {self.endpoint} failed after {self._max_retries} retries: {last_exc}"
+        )
+
+    def _handle_response(self, response: requests.Response) -> dict[str, Any]:
+        if response.status_code == 429:
+            raise ShopifyRateLimitError(
+                "Shopify returned HTTP 429 Too Many Requests",
+                retry_after=response.headers.get("Retry-After"),
+            )
+
+        try:
+            body = response.json()
+        except ValueError as exc:
+            raise ShopifyRequestError(
+                f"Non-JSON response from Shopify (status {response.status_code})"
+            ) from exc
+
+        errors = body.get("errors")
+        if errors:
+            # THROTTLED is Shopify's cost-based rate-limit signal, surfaced
+            # inside the errors array rather than as an HTTP status code.
+            if _is_throttled(errors):
+                raise ShopifyRateLimitError("Shopify GraphQL request was throttled")
+            raise ShopifyGraphQLError(
+                f"Shopify GraphQL returned errors: {errors}", errors=errors
+            )
+
+        self._maybe_backoff_for_cost(body)
+
+        return body.get("data", {})
+
+    def _maybe_backoff_for_cost(self, body: dict[str, Any]) -> None:
+        """Read extensions.cost.throttleStatus and pause if the bucket is low.
+
+        We sleep before returning to the caller, once we already know the
+        bucket dropped below SHOPIFY_TOOLKIT_RATE_LIMIT_BUFFER on *this*
+        response — rather than deferring the check to the next call. That
+        keeps the client safe even for a caller who only ever makes a single
+        call in a request cycle: it won't hand back control while the bucket
+        is still recovering. The sleep is capped at
+        SHOPIFY_TOOLKIT_MAX_BACKOFF_SECONDS so a single call can't block the
+        thread indefinitely under a sync WSGI worker — a caller needing a
+        longer wait should catch ShopifyRateLimitError and retry via its own
+        queue instead.
+        """
+        throttle_status = (body.get("extensions") or {}).get("cost", {}).get(
+            "throttleStatus", {}
+        )
+        available = throttle_status.get("currentlyAvailable")
+        restore_rate = throttle_status.get("restoreRate") or 50
+        if available is not None and available < self._rate_limit_buffer:
+            deficit = self._rate_limit_buffer - available
+            sleep_for = min(max(deficit / restore_rate, 0), self._max_backoff)
+            logger.info(
+                "Shopify rate limit bucket low (%s available, buffer %s); "
+                "sleeping %.2fs before returning",
+                available,
+                self._rate_limit_buffer,
+                sleep_for,
+            )
+            time.sleep(sleep_for)
+
+    def _sleep_backoff(self, attempt: int) -> None:
+        delay = 2 ** (attempt - 1)
+        logger.info("Retrying Shopify request (attempt %s) after %.2fs", attempt, delay)
+        time.sleep(delay)
+
+
+def _is_throttled(errors: list) -> bool:
+    for error in errors:
+        extensions = error.get("extensions") or {}
+        if extensions.get("code") == "THROTTLED":
+            return True
+    return False

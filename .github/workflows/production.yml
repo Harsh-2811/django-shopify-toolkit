@@ -1,0 +1,106 @@
+name: Production (PyPI)
+
+# Push to `main` (i.e. staging merged into main) -> full test suite ->
+# build -> publish to real PyPI -> tag the commit vX.Y.Z to match.
+#
+# Safe to push repeatedly: if this exact version is already on PyPI, the
+# publish step is skipped instead of failing (PyPI rejects re-uploading an
+# existing version+file) — merging to main without bumping the version
+# just no-ops instead of breaking the pipeline.
+on:
+  push:
+    branches: ["main"]
+  workflow_dispatch:
+
+jobs:
+  test:
+    uses: ./.github/workflows/test.yml
+
+  build:
+    needs: test
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      already_published: ${{ steps.check.outputs.already_published }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install build tooling
+        run: python -m pip install --upgrade pip build twine
+
+      - name: Read version from pyproject.toml
+        id: version
+        run: |
+          VERSION=$(python -c "import tomllib; print(tomllib.load(open('pyproject.toml','rb'))['project']['version'])")
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "Package version: $VERSION"
+
+      - name: Verify __init__.py version matches pyproject.toml
+        run: |
+          INIT_VERSION=$(python -c "import re; print(re.search(r'__version__ = \"(.+)\"', open('src/shopify_toolkit/__init__.py').read()).group(1))")
+          if [ "$INIT_VERSION" != "${{ steps.version.outputs.version }}" ]; then
+            echo "Version mismatch: pyproject.toml=${{ steps.version.outputs.version }} vs __init__.py=$INIT_VERSION"
+            exit 1
+          fi
+
+      - name: Check whether this version is already on PyPI
+        id: check
+        run: |
+          HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" \
+            "https://pypi.org/pypi/django-shopify-toolkit/${{ steps.version.outputs.version }}/json")
+          if [ "$HTTP_CODE" = "200" ]; then
+            echo "already_published=true" >> "$GITHUB_OUTPUT"
+            echo "Version ${{ steps.version.outputs.version }} is already on PyPI — will skip publishing."
+          else
+            echo "already_published=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Build
+        run: python -m build
+
+      - name: twine check
+        run: twine check dist/*
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
+  publish:
+    needs: build
+    if: needs.build.outputs.already_published == 'false'
+    runs-on: ubuntu-latest
+    environment: pypi
+    permissions:
+      id-token: write
+      contents: write   # to push the vX.Y.Z tag after a successful publish
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
+      - name: Publish to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+
+      - name: Tag the release commit
+        run: |
+          VERSION="${{ needs.build.outputs.version }}"
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git tag "v$VERSION"
+          git push origin "v$VERSION"
+
+  skipped:
+    needs: build
+    if: needs.build.outputs.already_published == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "Skipped publish — version ${{ needs.build.outputs.version }} is already on PyPI. Bump the version in pyproject.toml and __init__.py to release again."
