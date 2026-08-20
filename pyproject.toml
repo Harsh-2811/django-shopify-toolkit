@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "django-shopify-toolkit"
-version = "1.0.0"
+version = "1.0.1"
 description = "A reusable, installable Django app for Shopify Admin GraphQL integration — multi-tenant, encrypted tokens, rate-limit aware."
 readme = "README.md"
 license = "MIT"
@@ -51,11 +51,6 @@ dev = [
     "build",
     "twine",
 ]
-
-[project.urls]
-Homepage = "https://github.com/Harsh-2811/django-shopify-toolkit"
-Repository = "https://github.com/Harsh-2811/django-shopify-toolkit"
-Changelog = "https://github.com/Harsh-2811/django-shopify-toolkit/blob/main/CHANGELOG.md"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/shopify_toolkit"]
