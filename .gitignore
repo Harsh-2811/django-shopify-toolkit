@@ -1,0 +1,54 @@
+# Byte-compiled / optimized files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Distribution / packaging
+build/
+dist/
+*.egg-info/
+.eggs/
+wheels/
+
+# Virtual environments
+.venv/
+venv/
+env/
+ENV/
+
+# Testing / coverage
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+coverage.xml
+
+# Django
+*.sqlite3
+local_settings.py
+media/
+staticfiles/
+
+# Environment / secrets
+.env
+.env.*
+
+# Local hardcoded demo script — has real store credentials pasted into it,
+# never meant to be pushed
+demo.py
+
+# Personal/local files not meant for the repo
+kling_20260818_IMAGE_Flat_vecto_5393_0.png
+
+# Editors / IDEs
+.vscode/
+.idea/
+*.swp
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Type checking / linting caches
+.mypy_cache/
+.ruff_cache/
