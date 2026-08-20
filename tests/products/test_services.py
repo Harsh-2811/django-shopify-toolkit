@@ -277,7 +277,7 @@ def test_update_product_variant_success(shopify_store):
 
     sent_body = json.loads(responses.calls[0].request.body)
     assert sent_body["variables"]["productId"] == PRODUCT_ID
-    assert sent_body["variables"]["variants"] == [{"id": VARIANT_ID, "price": "129.99", "sku": "SH-BLK-09-PRO"}]
+    assert sent_body["variables"]["variants"] == [{"id": VARIANT_ID, "price": "129.99", "inventoryItem": {"sku": "SH-BLK-09-PRO"}}]
 
 
 @responses.activate

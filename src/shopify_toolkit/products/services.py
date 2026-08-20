@@ -1,10 +1,12 @@
+from __future__ import annotations
+
+import re
 """Python-facing service functions for the Products, Options, and Variants area.
 
 Every function takes an explicit ShopifyStore and returns plain dataclasses,
 not raw GraphQL response shapes — callers never touch edges/nodes/cursors
 directly.
 """
-from __future__ import annotations
 
 from dataclasses import dataclass, field
 from typing import Any, Iterator, Literal, Sequence
@@ -293,6 +295,157 @@ def get_product_variant(store: ShopifyStore, variant_id: str) -> ProductVariant 
     return _parse_variant(node)
 
 
+def _format_variant_input(raw: dict[str, Any]) -> dict[str, Any]:
+    """Format and robustly sanitize a variant dict for Shopify's ProductVariantsBulkInput.
+
+    In Shopify 2024-07+, sku, requiresShipping, and weight must be nested inside
+    the inventoryItem input object rather than at the top level of the variant.
+    Sanitizes money, weights, units, and boolean types to prevent GraphQL schema rejection.
+    """
+    v = camelize_keys(raw)
+    out: dict[str, Any] = {}
+    inv_item: dict[str, Any] = {}
+
+    # Extract existing inventoryItem dict if caller already nested it
+    if "inventoryItem" in v and isinstance(v["inventoryItem"], dict):
+        inv_item.update(v.pop("inventoryItem"))
+
+    # 1. SKU
+    if "sku" in v:
+        raw_sku = v.pop("sku")
+        if raw_sku is not None:
+            clean_sku = str(raw_sku).strip()
+            if clean_sku:
+                inv_item["sku"] = clean_sku
+
+    # 2. Requires Shipping
+    if "requiresShipping" in v:
+        raw_rs = v.pop("requiresShipping")
+        if raw_rs is not None:
+            if isinstance(raw_rs, str):
+                inv_item["requiresShipping"] = raw_rs.strip().lower() in ("true", "1", "yes", "t")
+            else:
+                inv_item["requiresShipping"] = bool(raw_rs)
+
+    # 3. Tracked
+    if "tracked" in v:
+        raw_tr = v.pop("tracked")
+        if raw_tr is not None:
+            if isinstance(raw_tr, str):
+                inv_item["tracked"] = raw_tr.strip().lower() in ("true", "1", "yes", "t")
+            else:
+                inv_item["tracked"] = bool(raw_tr)
+
+    # 4. Weight & Weight Unit
+    weight = v.pop("weight", None)
+    weight_unit = v.pop("weightUnit", None)
+    if weight is not None:
+        w_str = str(weight).strip()
+        if w_str:
+            if "," in w_str and "." not in w_str:
+                w_str = w_str.replace(",", ".")
+            w_str = re.sub(r"[^\d.]", "", w_str)
+            if w_str:
+                try:
+                    w_val = float(w_str)
+                    if w_val >= 0:
+                        u = str(weight_unit or "KILOGRAMS").strip().upper()
+                        if u in ("KG", "KGS", "KILOGRAM", "KILOGRAMS"):
+                            valid_unit = "KILOGRAMS"
+                        elif u in ("G", "GRAM", "GRAMS"):
+                            valid_unit = "GRAMS"
+                        elif u in ("LB", "LBS", "POUND", "POUNDS"):
+                            valid_unit = "POUNDS"
+                        elif u in ("OZ", "OUNCE", "OUNCES"):
+                            valid_unit = "OUNCES"
+                        else:
+                            valid_unit = "KILOGRAMS"
+
+                        inv_item["measurement"] = {
+                            "weight": {
+                                "value": w_val,
+                                "unit": valid_unit,
+                            }
+                        }
+                except (ValueError, TypeError):
+                    pass
+
+    if inv_item:
+        out["inventoryItem"] = inv_item
+
+    # 5. Compare At Price (Safely sanitize; omit invalid non-numeric strings)
+    if "compareAtPrice" in v:
+        raw_comp = v.pop("compareAtPrice")
+        if raw_comp is not None:
+            c_str = str(raw_comp).strip()
+            if c_str:
+                if "," in c_str and "." not in c_str:
+                    c_str = c_str.replace(",", ".")
+                c_str = re.sub(r"[^\d.]", "", c_str)
+                if c_str:
+                    try:
+                        c_val = float(c_str)
+                        if c_val >= 0:
+                            out["compareAtPrice"] = f"{c_val:.2f}"
+                    except (ValueError, TypeError):
+                        pass
+
+    # 6. Price
+    if "price" in v:
+        raw_p = v.pop("price")
+        if raw_p is not None:
+            p_str = str(raw_p).strip()
+            if p_str:
+                if "," in p_str and "." not in p_str:
+                    p_str = p_str.replace(",", ".")
+                p_str = re.sub(r"[^\d.]", "", p_str)
+                if p_str:
+                    try:
+                        p_val = float(p_str)
+                        out["price"] = f"{p_val:.2f}"
+                    except (ValueError, TypeError):
+                        out["price"] = str(raw_p)
+                else:
+                    out["price"] = "0.00"
+            else:
+                out["price"] = "0.00"
+        else:
+            out["price"] = "0.00"
+
+    # 7. Barcode
+    if "barcode" in v:
+        raw_b = v.pop("barcode")
+        if raw_b is not None:
+            clean_b = str(raw_b).strip()
+            if clean_b:
+                out["barcode"] = clean_b
+
+    # 8. Taxable
+    if "taxable" in v:
+        raw_tax = v.pop("taxable")
+        if raw_tax is not None:
+            if isinstance(raw_tax, str):
+                out["taxable"] = raw_tax.strip().lower() in ("true", "1", "yes", "t")
+            else:
+                out["taxable"] = bool(raw_tax)
+
+    # 9. Media ID
+    if "mediaId" in v:
+        raw_m = v.pop("mediaId")
+        if raw_m is not None and str(raw_m).strip():
+            out["mediaId"] = str(raw_m).strip()
+
+    # 10. Option Values
+    if "optionValues" in v:
+        raw_ov = v.pop("optionValues")
+        if raw_ov and isinstance(raw_ov, list):
+            out["optionValues"] = [camelize_keys(ov) for ov in raw_ov if isinstance(ov, dict)]
+
+    # Copy remaining fields (id, etc.)
+    out.update(v)
+    return out
+
+
 def create_product_variant(
     store: ShopifyStore,
     product_id: str,
@@ -316,7 +469,7 @@ def create_product_variant(
         "taxable": taxable,
     }
     if option_values:
-        variant_input["optionValues"] = [camelize_keys(ov) for ov in option_values]
+        variant_input["optionValues"] = option_values
     if compare_at_price is not None:
         variant_input["compareAtPrice"] = str(compare_at_price)
     if sku is not None:
@@ -330,7 +483,7 @@ def create_product_variant(
     if media_id is not None:
         variant_input["mediaId"] = media_id
 
-    variant_input.update(camelize_keys(extra_fields))
+    variant_input.update(extra_fields)
     created = bulk_create_variants(store, product_id, [variant_input])
     if not created:
         raise ShopifyUserError(
@@ -344,7 +497,7 @@ def bulk_create_variants(
 ) -> list[ProductVariant]:
     """Create multiple variants for a product in a single bulk mutation."""
     client = ShopifyGraphQLClient(store)
-    payload = [camelize_keys(v) for v in variants]
+    payload = [_format_variant_input(v) for v in variants]
     data = client.execute(
         PRODUCT_VARIANTS_BULK_CREATE_MUTATION,
         {"productId": product_id, "variants": payload},
@@ -391,7 +544,7 @@ def update_product_variant(
         variant_payload["weightUnit"] = weight_unit
     if media_id is not None:
         variant_payload["mediaId"] = media_id
-    variant_payload.update(camelize_keys(extra_fields))
+    variant_payload.update(extra_fields)
 
     updated = bulk_update_variants(store, product_id, [variant_payload])
     if not updated:
@@ -407,7 +560,7 @@ def bulk_update_variants(
 ) -> list[ProductVariant]:
     """Update multiple variants for a product in a single bulk mutation."""
     client = ShopifyGraphQLClient(store)
-    payload = [camelize_keys(v) for v in variants]
+    payload = [_format_variant_input(v) for v in variants]
     data = client.execute(
         PRODUCT_VARIANTS_BULK_UPDATE_MUTATION,
         {"productId": product_id, "variants": payload},
@@ -415,6 +568,7 @@ def bulk_update_variants(
     res = data.get("productVariantsBulkUpdate") or {}
     _raise_for_user_errors(res.get("userErrors", []))
     return [_parse_variant(v_node, product_id=product_id) for v_node in res.get("productVariants") or []]
+
 
 
 def delete_product_variants(

@@ -1,14 +1,14 @@
 name: Staging (TestPyPI)
 
-# Push to `staging` -> full test suite -> build -> publish to TestPyPI.
-# Safe to push repeatedly: if this exact version is already on TestPyPI,
-# the publish step is skipped instead of failing the whole pipeline (PyPI
-# rejects re-uploading an existing version+file, so this just avoids a
-# noisy failure on every push that doesn't bump the version).
 on:
   push:
     branches: ["staging"]
   workflow_dispatch:
+
+# Prevent two runs from racing to publish the same version in parallel.
+concurrency:
+  group: staging-publish
+  cancel-in-progress: false
 
 jobs:
   test:
@@ -19,7 +19,6 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       version: ${{ steps.version.outputs.version }}
-      already_published: ${{ steps.check.outputs.already_published }}
     steps:
       - uses: actions/checkout@v4
 
@@ -38,18 +37,6 @@ jobs:
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
           echo "Package version: $VERSION"
 
-      - name: Check whether this version is already on TestPyPI
-        id: check
-        run: |
-          HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" \
-            "https://test.pypi.org/pypi/django-shopify-toolkit/${{ steps.version.outputs.version }}/json")
-          if [ "$HTTP_CODE" = "200" ]; then
-            echo "already_published=true" >> "$GITHUB_OUTPUT"
-            echo "Version ${{ steps.version.outputs.version }} is already on TestPyPI — will skip publishing."
-          else
-            echo "already_published=false" >> "$GITHUB_OUTPUT"
-          fi
-
       - name: Build
         run: python -m build
 
@@ -63,7 +50,6 @@ jobs:
 
   publish:
     needs: build
-    if: needs.build.outputs.already_published == 'false'
     runs-on: ubuntu-latest
     environment: testpypi
     permissions:
@@ -78,10 +64,8 @@ jobs:
         uses: pypa/gh-action-pypi-publish@release/v1
         with:
           repository-url: https://test.pypi.org/legacy/
+          skip-existing: true
 
-  skipped:
-    needs: build
-    if: needs.build.outputs.already_published == 'true'
-    runs-on: ubuntu-latest
-    steps:
-      - run: echo "Skipped publish — version ${{ needs.build.outputs.version }} is already on TestPyPI. Bump the version to publish again."
+      - name: Report outcome
+        run: |
+          echo "Version ${{ needs.build.outputs.version }}: published, or already existed on TestPyPI and was skipped."
