@@ -42,7 +42,7 @@ class Migration(migrations.Migration):
                         blank=True, default="", max_length=255
                     ),
                 ),
-                ("api_version", models.CharField(default="2025-01", max_length=10)),
+                ("api_version", models.CharField(default="2026-07", max_length=10)),
                 ("scopes", models.TextField(blank=True)),
                 ("is_active", models.BooleanField(default=True)),
                 ("created_at", models.DateTimeField(auto_now_add=True)),

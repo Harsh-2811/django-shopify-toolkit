@@ -54,3 +54,16 @@ Initial release.
   pushing without a version bump is a safe no-op. Replaces the old
   `publish.yml` (release-triggered) and `test-publish.yml` (manual-only)
   workflows with `staging.yml` and `production.yml`.
+- `test.yml`'s "Run pytest" step now uses `python -m pytest` instead of the
+  bare `pytest` console script — the module form adds the repo root to
+  `sys.path` early enough for pytest-django to import
+  `DJANGO_SETTINGS_MODULE` ("tests.settings"); the bare command failed in CI
+  with `ImportError: No module named 'tests'` despite working locally.
+- Test suite switched from SQLite to a real Postgres service container —
+  `tests/settings.py` now connects to Postgres (configurable via
+  `POSTGRES_*` env vars), and `test.yml`'s matrixed `test` job runs a
+  `postgres:16-alpine` service alongside every Python/Django combination.
+  SQLite's `SELECT ... FOR UPDATE` is a documented no-op, so it could never
+  exercise the Client Credentials Grant row-locking (`auth.py`) as a real
+  regression check — previously that was only verified by manually
+  spinning up Postgres. `psycopg2-binary` is now a `dev` extra.

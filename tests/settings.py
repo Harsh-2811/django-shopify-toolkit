@@ -1,19 +1,32 @@
-"""Minimal Django settings for running this package's test suite.
+"""Django settings for running this package's test suite.
 
 Not shipped to consumers — this is a throwaway project config used only by
 pytest-django (see DJANGO_SETTINGS_MODULE in pyproject.toml).
 """
+import os
 
 SECRET_KEY = "test-secret-key-not-for-production"
 DEBUG = True
 USE_TZ = True
 
-DATABASES = {
-    "default": {
-        "ENGINE": "django.db.backends.sqlite3",
-        "NAME": ":memory:",
+if os.environ.get("DB_ENGINE") == "sqlite3" or os.environ.get("USE_SQLITE", "").lower() in ("1", "true", "yes"):
+    DATABASES = {
+        "default": {
+            "ENGINE": "django.db.backends.sqlite3",
+            "NAME": ":memory:",
+        }
     }
-}
+else:
+    DATABASES = {
+        "default": {
+            "ENGINE": os.environ.get("DB_ENGINE", "django.db.backends.postgresql"),
+            "NAME": os.environ.get("POSTGRES_DB", "postgres"),
+            "USER": os.environ.get("POSTGRES_USER", "postgres"),
+            "PASSWORD": os.environ.get("POSTGRES_PASSWORD", "postgres"),
+            "HOST": os.environ.get("POSTGRES_HOST", "localhost"),
+            "PORT": os.environ.get("POSTGRES_PORT", "5432"),
+        }
+    }
 
 INSTALLED_APPS = [
     "django.contrib.contenttypes",

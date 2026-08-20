@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Iterator
 
 from .._utils import camelize_keys
 from ..client import ShopifyGraphQLClient
@@ -66,6 +67,17 @@ def list_customers(store: ShopifyStore, *, first: int = 50, after: str | None = 
         has_next_page=page_info["hasNextPage"],
         end_cursor=page_info.get("endCursor"),
     )
+
+
+def iter_all_customers(store: ShopifyStore, *, batch_size: int = 50) -> Iterator[Customer]:
+    """Yield every customer for a store, fetching subsequent pages automatically."""
+    after = None
+    while True:
+        page = list_customers(store, first=batch_size, after=after)
+        yield from page.customers
+        if not page.has_next_page:
+            return
+        after = page.end_cursor
 
 
 def get_customer(store: ShopifyStore, customer_id: str) -> Customer | None:

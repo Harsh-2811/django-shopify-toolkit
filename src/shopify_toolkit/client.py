@@ -7,6 +7,7 @@ built in here, not bolted on later.
 """
 from __future__ import annotations
 
+import collections
 import logging
 import threading
 import time
@@ -17,6 +18,7 @@ import requests
 from .auth import get_access_token
 from .conf import (
     get_max_backoff_seconds,
+    get_max_pooled_sessions,
     get_max_retries,
     get_rate_limit_buffer,
     get_request_timeout,
@@ -34,19 +36,31 @@ logger = logging.getLogger(__name__)
 # the `headers=` kwarg in execute(), never via session.headers), and each
 # store's pool is kept strictly separate by domain key, so no store's
 # connections/state can cross into another's request.
-_session_pool: dict[str, requests.Session] = {}
+#
+# Bounded (LRU-evicted) rather than an unbounded dict — a deployment
+# managing thousands of stores shouldn't accumulate one Session forever per
+# store ever seen. SHOPIFY_TOOLKIT_MAX_POOLED_SESSIONS caps it; the
+# least-recently-used session is closed and dropped once exceeded.
+_session_pool: "collections.OrderedDict[str, requests.Session]" = collections.OrderedDict()
 _session_pool_lock = threading.Lock()
 
 
 def _get_pooled_session(shop_domain: str) -> requests.Session:
-    session = _session_pool.get(shop_domain)
-    if session is None:
-        with _session_pool_lock:
-            session = _session_pool.get(shop_domain)
-            if session is None:
-                session = requests.Session()
-                _session_pool[shop_domain] = session
-    return session
+    with _session_pool_lock:
+        session = _session_pool.get(shop_domain)
+        if session is not None:
+            _session_pool.move_to_end(shop_domain)
+            return session
+
+        session = requests.Session()
+        _session_pool[shop_domain] = session
+
+        max_size = get_max_pooled_sessions()
+        while len(_session_pool) > max_size:
+            _, evicted = _session_pool.popitem(last=False)
+            evicted.close()
+
+        return session
 
 
 class ShopifyGraphQLClient:

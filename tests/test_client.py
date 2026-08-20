@@ -201,3 +201,29 @@ def test_low_cost_bucket_backoff_is_capped_at_max_backoff(shopify_store, monkeyp
     client.execute("query { shop { name } }")
 
     assert sleeps == [3]
+
+
+@pytest.mark.django_db
+def test_session_pool_evicts_least_recently_used_beyond_max_size(settings, monkeypatch):
+    from shopify_toolkit.client import _get_pooled_session, _session_pool
+
+    settings.SHOPIFY_TOOLKIT_MAX_POOLED_SESSIONS = 2
+    _session_pool.clear()
+
+    session_a = _get_pooled_session("evict-a.myshopify.com")
+    session_b = _get_pooled_session("evict-b.myshopify.com")
+    assert list(_session_pool.keys()) == ["evict-a.myshopify.com", "evict-b.myshopify.com"]
+
+    close_calls = []
+    monkeypatch.setattr(session_b, "close", lambda: close_calls.append(session_b))
+
+    # Touch A again so B becomes the least-recently-used.
+    assert _get_pooled_session("evict-a.myshopify.com") is session_a
+
+    # Adding a third store should evict B (LRU), not A (recently touched).
+    _get_pooled_session("evict-c.myshopify.com")
+
+    assert list(_session_pool.keys()) == ["evict-a.myshopify.com", "evict-c.myshopify.com"]
+    assert "evict-b.myshopify.com" not in _session_pool
+    assert close_calls == [session_b]  # evicted session must be closed, not just dropped
+    _session_pool.clear()
