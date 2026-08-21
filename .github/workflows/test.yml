@@ -3,7 +3,6 @@ name: Test
 on:
   push:
     branches-ignore: ["main", "staging"]
-  pull_request:
   # Lets staging.yml/production.yml run this as their own test job via
   # `uses: ./.github/workflows/test.yml` instead of duplicating the matrix.
   workflow_call:
