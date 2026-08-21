@@ -1,8 +1,16 @@
 import pytest
-from django.contrib import admin
+from django.apps import apps
 
-from shopify_toolkit.admin import ShopifyStoreAdmin
-from shopify_toolkit.models import ShopifyStore
+if not apps.is_installed("django.contrib.admin"):
+    pytest.skip(
+        "django.contrib.admin is not installed under this settings module",
+        allow_module_level=True,
+    )
+
+from django.contrib import admin  # noqa: E402
+
+from shopify_toolkit.admin import ShopifyStoreAdmin  # noqa: E402
+from shopify_toolkit.models import ShopifyStore  # noqa: E402
 
 
 @pytest.fixture

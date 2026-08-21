@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "django-shopify-toolkit"
-version = "1.0.2"
+version = "1.2.0"
 description = "A reusable, installable Django app for Shopify Admin GraphQL integration — multi-tenant, encrypted tokens, rate-limit aware."
 readme = "README.md"
 license = "MIT"
@@ -41,6 +41,14 @@ drf = [
 ]
 testing = [
     "responses>=0.23",
+]
+mongodb = [
+    # django-mongodb-backend's major.minor must match Django's exactly (5.2.x backend <-> Django
+    # 5.2, 6.0.x backend <-> Django 6.0, etc — verified against MongoDB's own compatibility
+    # docs) — not just ">=". This package's own Django ceiling is <6.0 (pyproject.toml
+    # dependencies), so pinned to the one Django minor (5.2) both ranges actually overlap on.
+    # Bump this in lockstep if this package's Django ceiling ever moves.
+    "django-mongodb-backend>=5.2,<5.3",
 ]
 dev = [
     "pytest>=7.0",
