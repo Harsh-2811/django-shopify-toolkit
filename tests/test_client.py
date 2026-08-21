@@ -54,6 +54,34 @@ def test_execute_graphql_errors_array_raises(shopify_store):
 
 @responses.activate
 @pytest.mark.django_db
+def test_execute_bare_string_errors_raises_graphql_error_not_attributeerror(shopify_store):
+    """Regression test: Shopify doesn't always shape "errors" as the standard GraphQL array of
+    {"message": ..., "extensions": {...}} objects. Verified against Shopify's own community/
+    developer forums that an auth failure (invalid/expired/revoked token) returns HTTP 401 with
+    a *bare string* there instead — {"errors": "[API] Invalid API key or access token ..."} —
+    reproduced locally before this fix: passing that straight to _is_throttled() crashed with
+    AttributeError: 'str' object has no attribute 'get' instead of raising the clean
+    ShopifyGraphQLError this test checks for.
+    """
+    responses.add(
+        responses.POST,
+        ENDPOINT,
+        json={"errors": "[API] Invalid API key or access token (unrecognized login or wrong password)"},
+        status=401,
+    )
+    client = ShopifyGraphQLClient(shopify_store)
+
+    with pytest.raises(ShopifyGraphQLError) as exc_info:
+        client.execute("query { shop { name } }")
+
+    assert "Invalid API key" in str(exc_info.value)
+    assert exc_info.value.errors == [
+        {"message": "[API] Invalid API key or access token (unrecognized login or wrong password)"}
+    ]
+
+
+@responses.activate
+@pytest.mark.django_db
 def test_execute_low_cost_bucket_triggers_backoff_sleep(shopify_store, monkeypatch):
     sleeps = []
     monkeypatch.setattr("shopify_toolkit.client.time.sleep", lambda s: sleeps.append(s))

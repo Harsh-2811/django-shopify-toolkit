@@ -144,6 +144,9 @@ class ShopifyGraphQLClient:
 
         errors = body.get("errors")
         if errors:
+          
+            if isinstance(errors, str):
+                errors = [{"message": errors}]
             # THROTTLED is Shopify's cost-based rate-limit signal, surfaced
             # inside the errors array rather than as an HTTP status code.
             if _is_throttled(errors):
@@ -195,6 +198,8 @@ class ShopifyGraphQLClient:
 
 def _is_throttled(errors: list) -> bool:
     for error in errors:
+        if not isinstance(error, dict):
+            continue
         extensions = error.get("extensions") or {}
         if extensions.get("code") == "THROTTLED":
             return True
