@@ -22,12 +22,18 @@ def test_shopify_store_defaults(shopify_store):
 def test_access_token_encrypted_at_rest(shopify_store):
     # The raw DB value must not equal the plaintext token — EncryptedCharField
     # should actually be encrypting it, not just proxying a CharField.
-    with connection.cursor() as cursor:
-        cursor.execute(
-            "SELECT access_token FROM shopify_toolkit_shopifystore WHERE id = %s",
-            [shopify_store.id],
+    if connection.vendor == "mongodb":
+        raw_doc = connection.database["shopify_toolkit_shopifystore"].find_one(
+            {"_id": shopify_store.pk}
         )
-        raw_value = cursor.fetchone()[0]
+        raw_value = raw_doc["access_token"]
+    else:
+        with connection.cursor() as cursor:
+            cursor.execute(
+                "SELECT access_token FROM shopify_toolkit_shopifystore WHERE id = %s",
+                [shopify_store.id],
+            )
+            raw_value = cursor.fetchone()[0]
     assert raw_value != "shpat_test_token_1"
 
     # But reading back through the ORM decrypts transparently.

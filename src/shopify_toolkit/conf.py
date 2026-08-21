@@ -18,6 +18,7 @@ DEFAULT_RATE_LIMIT_BUFFER = 100
 DEFAULT_MAX_BACKOFF_SECONDS = 10
 DEFAULT_REQUEST_TIMEOUT = 30
 DEFAULT_MAX_POOLED_SESSIONS = 500
+DEFAULT_DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
 
 def get_api_secret() -> str:
@@ -76,3 +77,20 @@ def get_max_pooled_sessions() -> int:
     are evicted (and closed) once this is exceeded.
     """
     return getattr(settings, "SHOPIFY_TOOLKIT_MAX_POOLED_SESSIONS", DEFAULT_MAX_POOLED_SESSIONS)
+
+
+def get_default_auto_field() -> str:
+    """Primary-key field class used for ShopifyStore/WebhookEvent's implicit "id" field.
+
+    Defaults to BigAutoField — unchanged from every release so far, matches
+    migrations/0001_initial.py exactly, safe for every existing Postgres/MySQL install. Only
+    override this if you're running this app against a backend that doesn't support
+    AutoField/BigAutoField as a primary key — e.g. MongoDB, which requires
+    'django_mongodb_backend.fields.ObjectIdAutoField' instead. See MULTI_DB_SUPPORT_PLAN.md.
+
+    Deliberately a dedicated setting rather than reusing Django's own project-wide
+    DEFAULT_AUTO_FIELD — that setting would repoint every app's primary key type, not just this
+    one, which is the wrong blast radius for a host project that has this app on Mongo but
+    everything else on Postgres.
+    """
+    return getattr(settings, "SHOPIFY_TOOLKIT_DEFAULT_AUTO_FIELD", DEFAULT_DEFAULT_AUTO_FIELD)

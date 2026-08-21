@@ -312,6 +312,47 @@ def test_api_error_handling(shopify_store):
 
 ---
 
+### 9. Running on MongoDB (optional)
+
+By default this package targets a relational database (Postgres/MySQL/SQLite) with an
+integer `BigAutoField` primary key on `ShopifyStore`/`WebhookEvent`. MongoDB doesn't support
+`AutoField`/`BigAutoField` as a primary key at all, so running this app on Mongo needs two
+extra steps beyond a normal install — see `MULTI_DB_SUPPORT_PLAN.md` in this repo for the full
+research and rationale behind this.
+
+```bash
+pip install django-shopify-toolkit[mongodb]
+```
+
+```python
+# settings.py
+
+# 1. Point this app's primary key at MongoDB's ObjectId type instead of the relational default.
+#    This only affects shopify_toolkit's own models — it does not touch Django's project-wide
+#    DEFAULT_AUTO_FIELD, so the rest of your project can stay on a different backend/PK type.
+SHOPIFY_TOOLKIT_DEFAULT_AUTO_FIELD = "django_mongodb_backend.fields.ObjectIdAutoField"
+
+# 2. Point this app at a separate migration history built for that PK type — the normal
+#    migrations/ history is frozen with BigAutoField and can't be replayed against Mongo.
+MIGRATION_MODULES = {
+    "shopify_toolkit": "shopify_toolkit.migrations_mongodb",
+}
+```
+
+**Known limitation:** the row-level locking that protects Client Credentials Grant token
+exchange from concurrent duplicate requests (`SELECT ... FOR UPDATE`) only runs on backends that
+support it — currently Postgres and MySQL. On MongoDB (same as SQLite) it's skipped entirely;
+the code still re-checks for an already-refreshed token before exchanging, so this doesn't cause
+incorrect behavior, just a small chance of two near-simultaneous requests each independently
+hitting Shopify's OAuth endpoint under heavy concurrent load. If you're running Client
+Credentials Grant stores on MongoDB under real concurrent traffic, be aware of this — it is not
+the same guarantee Postgres/MySQL get.
+
+This path is less exercised than the Postgres path this package's own CI runs against —
+verify it against a real MongoDB instance before relying on it in production.
+
+---
+
 ## License
 
 MIT License.

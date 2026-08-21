@@ -1,5 +1,6 @@
 import pytest
 import responses
+from django.db import connection
 from rest_framework.test import APIRequestFactory
 
 from shopify_toolkit.api.viewsets import ProductViewSet
@@ -66,9 +67,12 @@ def test_product_create_view_validates_input(shopify_store):
 @pytest.mark.django_db
 def test_product_retrieve_view_unknown_store_raises_does_not_exist():
     view = ProductViewSet.as_view({"get": "retrieve"})
-    request = factory.get("/api/stores/999/products/gid://shopify/Product/1/")
+
+    unknown_pk = "ffffffffffffffffffffff99" if connection.vendor == "mongodb" else 999
+
+    request = factory.get(f"/api/stores/{unknown_pk}/products/gid://shopify/Product/1/")
 
     from shopify_toolkit.models import ShopifyStore
 
     with pytest.raises(ShopifyStore.DoesNotExist):
-        view(request, pk="gid://shopify/Product/1", store_pk=999)
+        view(request, pk="gid://shopify/Product/1", store_pk=unknown_pk)

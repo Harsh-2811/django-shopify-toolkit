@@ -2,6 +2,8 @@ from datetime import timedelta
 
 import pytest
 import responses
+from django.db import connections, transaction
+from django.db.utils import NotSupportedError
 from django.utils import timezone
 
 from shopify_toolkit.auth import get_access_token
@@ -162,3 +164,64 @@ def test_locked_exchange_skips_reexchange_if_already_refreshed(ccg_store):
 
     assert token == "shpua_already_refreshed_by_another_request"
     assert len(responses.calls) == 0  # re-checked under the lock, no exchange happened
+
+
+@responses.activate
+@pytest.mark.django_db
+def test_ccg_exchange_skips_row_lock_on_non_locking_vendor(monkeypatch, ccg_store):
+    monkeypatch.setattr(connections["default"], "vendor", "mongodb")
+
+    def _atomic_must_not_be_called(*args, **kwargs):
+        raise NotSupportedError(
+            "transaction.atomic() is not supported on this backend "
+            "(simulating django-mongodb-backend's real, verified behavior)"
+        )
+
+    monkeypatch.setattr("shopify_toolkit.auth.transaction.atomic", _atomic_must_not_be_called)
+
+    responses.add(
+        responses.POST,
+        EXCHANGE_ENDPOINT,
+        json={"access_token": "shpua_mongo_token", "expires_in": 86399},
+        status=200,
+    )
+
+    token = get_access_token(ccg_store)
+
+    assert token == "shpua_mongo_token"
+    assert len(responses.calls) == 1
+
+
+@responses.activate
+@pytest.mark.django_db
+@pytest.mark.skipif(
+    connections["default"].vendor != "postgresql",
+    reason="asserts the real-row-lock path specifically; only meaningful when this suite is "
+    "actually running against Postgres (e.g. skipped under tests.settings_mongodb)",
+)
+def test_ccg_exchange_uses_row_lock_on_postgresql(monkeypatch, ccg_store):
+    """Inverse sanity check of the test above: on a real row-locking vendor (this suite's actual
+    Postgres connection), the locked path must still be taken — transaction.atomic() actually
+    gets called, not silently skipped for every backend."""
+    assert connections["default"].vendor == "postgresql"  # sanity: confirms what's being tested
+
+    calls = []
+    real_atomic = transaction.atomic
+
+    def _spy_atomic(*args, **kwargs):
+        calls.append((args, kwargs))
+        return real_atomic(*args, **kwargs)
+
+    monkeypatch.setattr("shopify_toolkit.auth.transaction.atomic", _spy_atomic)
+
+    responses.add(
+        responses.POST,
+        EXCHANGE_ENDPOINT,
+        json={"access_token": "shpua_pg_token", "expires_in": 86399},
+        status=200,
+    )
+
+    token = get_access_token(ccg_store)
+
+    assert token == "shpua_pg_token"
+    assert len(calls) == 1

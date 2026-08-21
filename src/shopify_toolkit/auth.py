@@ -21,7 +21,7 @@ from __future__ import annotations
 from datetime import timedelta
 
 import requests
-from django.db import transaction
+from django.db import connections, router, transaction
 from django.utils import timezone
 
 from .conf import get_request_timeout
@@ -31,6 +31,8 @@ from .models import ShopifyStore
 # Refresh this many seconds before actual expiry, so a request never gets
 # built with a token that expires mid-flight.
 _EXPIRY_BUFFER_SECONDS = 60
+
+_ROW_LOCKING_VENDORS = frozenset({"postgresql", "mysql"})
 
 
 def get_access_token(store: ShopifyStore) -> str:
@@ -73,24 +75,41 @@ def _exchange_client_credentials_locked(store: ShopifyStore) -> str:
     serialize instead of each independently hitting Shopify's OAuth endpoint
     at once when a token expires under heavy traffic (a "thundering herd").
 
-    On backends that support SELECT ... FOR UPDATE (Postgres, MySQL — what
-    any real deployment should be running) this acquires a genuine row
-    lock. On SQLite it's a harmless no-op (SQLite has no concurrent writers
-    to race in the first place), so this is safe for tests/dev too.
+    On backends that support SELECT ... FOR UPDATE inside a real transaction
+    (Postgres, MySQL — what any real deployment should be running) this
+    acquires a genuine row lock. On SQLite it's a harmless no-op (SQLite has
+    no concurrent writers to race in the first place). On MongoDB,
+    transaction.atomic() isn't a no-op — django-mongodb-backend raises
+    NotSupportedError for it entirely — so it's skipped rather than called;
+    see _ROW_LOCKING_VENDORS. In both the SQLite and MongoDB cases, the
+    re-check below after "acquiring" (a no-op or skipped) lock still catches
+    the common case (another request already refreshed the token); the only
+    real gap is two truly simultaneous exchanges both hitting Shopify's OAuth
+    endpoint, which is wasteful, not unsafe — the last write just wins.
     """
-    with transaction.atomic():
-        locked_store = ShopifyStore.objects.select_for_update().get(pk=store.pk)
-        # Re-check after acquiring the lock: another request may have
-        # already refreshed the token while we were waiting for it.
-        if locked_store.access_token and not _is_expired(locked_store):
-            store.access_token = locked_store.access_token
-            store.access_token_expires_at = locked_store.access_token_expires_at
-            return locked_store.access_token
+    alias = router.db_for_write(ShopifyStore, instance=store)
+    if connections[alias].vendor in _ROW_LOCKING_VENDORS:
+        with transaction.atomic(using=alias):
+            locked_store = ShopifyStore.objects.select_for_update().get(pk=store.pk)
+            return _refresh_if_needed(store, locked_store)
 
-        token = _exchange_client_credentials(locked_store)
+    locked_store = ShopifyStore.objects.get(pk=store.pk)
+    return _refresh_if_needed(store, locked_store)
+
+
+def _refresh_if_needed(store: ShopifyStore, locked_store: ShopifyStore) -> str:
+    # Re-check: another request may have already refreshed the token while
+    # we were waiting for the lock (or, on backends with no real lock, in
+    # the small window before this read).
+    if locked_store.access_token and not _is_expired(locked_store):
         store.access_token = locked_store.access_token
         store.access_token_expires_at = locked_store.access_token_expires_at
-        return token
+        return locked_store.access_token
+
+    token = _exchange_client_credentials(locked_store)
+    store.access_token = locked_store.access_token
+    store.access_token_expires_at = locked_store.access_token_expires_at
+    return token
 
 
 def _exchange_client_credentials(store: ShopifyStore) -> str:
