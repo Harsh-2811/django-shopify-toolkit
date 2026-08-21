@@ -1,8 +1,7 @@
 """GraphQL query and mutation strings for the Customers area.
 
-Scope-locked per CLAUDE.md: list customers, get single customer, create
-customer, update customer. No separate mutations.py for this module (see
-"Package layout" in CLAUDE.md) — mutation strings live here too.
+Covers: list customers, get single customer, create customer, update
+customer. No separate mutations.py for this module — mutation strings live here too.
 """
 
 CUSTOMER_FIELDS_FRAGMENT = """

@@ -7,11 +7,8 @@ directly. This keeps defaults and validation in exactly one place.
 from django.conf import settings
 from django.core.exceptions import ImproperlyConfigured
 
-# Shopify supports each stable API version for a minimum of 12 months, with
-# at least 9 months of overlap between consecutive quarterly releases. This
-# default must be bumped periodically or it silently expires — verified
-# against shopify.dev's versioning docs and confirmed working live against
-# a real store on 2026-08-20. Next bump needed before ~2027-07.
+# Shopify supports each stable API version for ~12 months. Bump this periodically or it
+# silently expires. Next bump needed before ~2027-07.
 DEFAULT_API_VERSION = "2026-07"
 DEFAULT_MAX_RETRIES = 3
 DEFAULT_RATE_LIMIT_BUFFER = 100
@@ -19,14 +16,14 @@ DEFAULT_MAX_BACKOFF_SECONDS = 10
 DEFAULT_REQUEST_TIMEOUT = 30
 DEFAULT_MAX_POOLED_SESSIONS = 500
 DEFAULT_DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
+DEFAULT_DB_SCHEMA = ""
 
 
 def get_api_secret() -> str:
     """Return SHOPIFY_TOOLKIT_API_SECRET, raising if it isn't configured.
 
-    This is a required setting, but it's only read (and validated) here, at
-    first use — e.g. when verifying a webhook signature — never at import
-    time. A project that never touches webhook code doesn't need it set.
+    Read lazily at first use (e.g. verifying a webhook signature), not at import time — a
+    project that never touches webhook code doesn't need it set.
     """
     value = getattr(settings, "SHOPIFY_TOOLKIT_API_SECRET", None)
     if not value:
@@ -53,15 +50,8 @@ def get_rate_limit_buffer() -> int:
 
 
 def get_max_backoff_seconds() -> float:
-    """Cap on any single blocking sleep (retry backoff or rate-limit backoff).
-
-    Both kinds of backoff in client.py block the calling thread — under a
-    sync WSGI deployment that ties up a worker process. This bounds the
-    worst case per call so a slow/throttled Shopify can't quietly exhaust
-    a worker pool; callers that need longer waits should catch
-    ShopifyRateLimitError/ShopifyRequestError and retry via their own queue
-    instead of relying on an unbounded in-process sleep.
-    """
+    """Cap on any single blocking sleep (retry backoff or rate-limit backoff), so a slow/
+    throttled Shopify can't tie up a sync worker indefinitely."""
     return getattr(settings, "SHOPIFY_TOOLKIT_MAX_BACKOFF_SECONDS", DEFAULT_MAX_BACKOFF_SECONDS)
 
 
@@ -71,26 +61,48 @@ def get_request_timeout() -> float:
 
 
 def get_max_pooled_sessions() -> int:
-    """Max distinct store domains kept in client.py's session pool at once.
-
-    Bounds memory in high-tenant-count deployments — oldest-used sessions
-    are evicted (and closed) once this is exceeded.
-    """
+    """Max distinct store domains kept in client.py's session pool at once; least-recently-used
+    sessions are evicted and closed beyond this."""
     return getattr(settings, "SHOPIFY_TOOLKIT_MAX_POOLED_SESSIONS", DEFAULT_MAX_POOLED_SESSIONS)
 
 
 def get_default_auto_field() -> str:
-    """Primary-key field class used for ShopifyStore/WebhookEvent's implicit "id" field.
+    """Primary-key field class for ShopifyStore/WebhookEvent. Defaults to BigAutoField. Override
+    only for a backend that doesn't support it as a PK — e.g. MongoDB, which needs
+    'django_mongodb_backend.fields.ObjectIdAutoField'. See MULTI_DB_SUPPORT_PLAN.md.
 
-    Defaults to BigAutoField — unchanged from every release so far, matches
-    migrations/0001_initial.py exactly, safe for every existing Postgres/MySQL install. Only
-    override this if you're running this app against a backend that doesn't support
-    AutoField/BigAutoField as a primary key — e.g. MongoDB, which requires
-    'django_mongodb_backend.fields.ObjectIdAutoField' instead. See MULTI_DB_SUPPORT_PLAN.md.
-
-    Deliberately a dedicated setting rather than reusing Django's own project-wide
-    DEFAULT_AUTO_FIELD — that setting would repoint every app's primary key type, not just this
-    one, which is the wrong blast radius for a host project that has this app on Mongo but
-    everything else on Postgres.
+    A dedicated setting rather than Django's own project-wide DEFAULT_AUTO_FIELD, which would
+    repoint every app's PK type, not just this one.
     """
     return getattr(settings, "SHOPIFY_TOOLKIT_DEFAULT_AUTO_FIELD", DEFAULT_DEFAULT_AUTO_FIELD)
+
+
+def get_db_schema() -> str:
+    """Dedicated PostgreSQL schema for ShopifyStore/WebhookEvent. Empty (default) = no special
+    handling. PostgreSQL-only — MySQL/SQLite have no equivalent concept.
+
+    Fresh installs only: set before the first `migrate`. migrations/0002_dedicated_schema.py
+    creates the schema and moves the tables in, but only runs its real logic the first time —
+    flipping this after that migration has already applied (even as a no-op) does nothing on a
+    later `migrate`. An existing install that wants to move needs a manual, one-time
+    `CREATE SCHEMA IF NOT EXISTS` + `ALTER TABLE ... SET SCHEMA`, not this setting.
+    """
+    return getattr(settings, "SHOPIFY_TOOLKIT_DB_SCHEMA", DEFAULT_DB_SCHEMA)
+
+
+def get_qualified_table_name(unqualified_name: str) -> str | None:
+    """Schema-qualified db_table string if SHOPIFY_TOOLKIT_DB_SCHEMA is set, else None.
+
+    Shared by models.py (Meta.db_table) and migrations/0002_dedicated_schema.py (its
+    AlterModelTable state_operations) so both agree. Returns None, not `unqualified_name`, when
+    unset — Django's migration autodetector cares whether db_table was explicitly set, not just
+    its resolved value, so it must be left off the model entirely rather than set to a matching
+    default.
+
+    Uses Django's old db_table schema-qualification workaround (ticket #1208): a string with an
+    embedded `"."`, which Django wraps once, producing `"schema"."table"`.
+    """
+    schema = get_db_schema()
+    if not schema:
+        return None
+    return f'{schema}"."{unqualified_name}'

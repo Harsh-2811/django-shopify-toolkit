@@ -5,8 +5,7 @@ GraphQL (list_products, list_orders, ...) would mean thousands of round
 trips. Shopify runs the query asynchronously as a job and hands back a
 JSONL file when it's done — this wraps that start/poll/download cycle.
 
-Scope-locked per CLAUDE.md's amended scope table: only the generic bulk
-*query* mechanism, not bulk mutations.
+Only the generic bulk *query* mechanism is supported here, not bulk mutations.
 """
 from __future__ import annotations
 

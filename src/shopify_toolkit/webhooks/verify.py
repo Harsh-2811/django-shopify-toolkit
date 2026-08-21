@@ -1,7 +1,7 @@
 """HMAC-SHA256 verification for incoming Shopify webhooks.
 
-Per CLAUDE.md principle #6: every webhook payload is verified against
-SHOPIFY_TOOLKIT_API_SECRET before it's trusted. No exceptions.
+Every webhook payload is verified against SHOPIFY_TOOLKIT_API_SECRET before it's trusted.
+No exceptions.
 """
 from __future__ import annotations
 

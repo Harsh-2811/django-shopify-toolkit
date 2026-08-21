@@ -13,8 +13,7 @@ get_access_token() below picks the right path per store: if client_id and
 client_secret are set, it exchanges (or reuses a still-valid cached
 exchange) and persists the result on that store's own row. That's per-store
 persisted state, not module-level shared state, so it stays safe for
-multi-tenant use per CLAUDE.md principle #2 — store A's exchange can never
-leak into store B's request.
+multi-tenant use — store A's exchange can never leak into store B's request.
 """
 from __future__ import annotations
 
@@ -71,21 +70,14 @@ def _is_expired(store: ShopifyStore) -> bool:
 
 
 def _exchange_client_credentials_locked(store: ShopifyStore) -> str:
-    """Exchange under a row lock, so concurrent requests for the same store
-    serialize instead of each independently hitting Shopify's OAuth endpoint
-    at once when a token expires under heavy traffic (a "thundering herd").
+    """Exchange under a row lock, so concurrent requests for the same store serialize instead of
+    each independently hitting Shopify's OAuth endpoint at once (a "thundering herd").
 
-    On backends that support SELECT ... FOR UPDATE inside a real transaction
-    (Postgres, MySQL — what any real deployment should be running) this
-    acquires a genuine row lock. On SQLite it's a harmless no-op (SQLite has
-    no concurrent writers to race in the first place). On MongoDB,
-    transaction.atomic() isn't a no-op — django-mongodb-backend raises
-    NotSupportedError for it entirely — so it's skipped rather than called;
-    see _ROW_LOCKING_VENDORS. In both the SQLite and MongoDB cases, the
-    re-check below after "acquiring" (a no-op or skipped) lock still catches
-    the common case (another request already refreshed the token); the only
-    real gap is two truly simultaneous exchanges both hitting Shopify's OAuth
-    endpoint, which is wasteful, not unsafe — the last write just wins.
+    Real row lock on Postgres/MySQL (_ROW_LOCKING_VENDORS). Skipped on SQLite (harmless no-op
+    there) and MongoDB (transaction.atomic() itself raises NotSupportedError, so it must not be
+    called at all, not just left as a no-op). The re-check below still catches the common case
+    without a lock; the only gap is two truly simultaneous exchanges hitting Shopify's OAuth
+    endpoint, which is wasteful, not unsafe.
     """
     alias = router.db_for_write(ShopifyStore, instance=store)
     if connections[alias].vendor in _ROW_LOCKING_VENDORS:

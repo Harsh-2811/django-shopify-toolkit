@@ -1,7 +1,7 @@
 """GraphQL mutation strings for the Bulk Operations area.
 
-Scope-locked per CLAUDE.md: run a bulk query. Field shapes and arguments
-verified against shopify.dev's bulkOperationRunQuery mutation reference.
+Covers: run a bulk query. Field shapes and arguments verified against
+shopify.dev's bulkOperationRunQuery mutation reference.
 """
 from .queries import BULK_OPERATION_FIELDS_FRAGMENT
 

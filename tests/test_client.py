@@ -55,14 +55,8 @@ def test_execute_graphql_errors_array_raises(shopify_store):
 @responses.activate
 @pytest.mark.django_db
 def test_execute_bare_string_errors_raises_graphql_error_not_attributeerror(shopify_store):
-    """Regression test: Shopify doesn't always shape "errors" as the standard GraphQL array of
-    {"message": ..., "extensions": {...}} objects. Verified against Shopify's own community/
-    developer forums that an auth failure (invalid/expired/revoked token) returns HTTP 401 with
-    a *bare string* there instead — {"errors": "[API] Invalid API key or access token ..."} —
-    reproduced locally before this fix: passing that straight to _is_throttled() crashed with
-    AttributeError: 'str' object has no attribute 'get' instead of raising the clean
-    ShopifyGraphQLError this test checks for.
-    """
+    """Shopify doesn't always shape "errors" as the standard GraphQL array of dicts — an auth
+    failure (401) sends a bare string instead. Must raise ShopifyGraphQLError, not crash."""
     responses.add(
         responses.POST,
         ENDPOINT,

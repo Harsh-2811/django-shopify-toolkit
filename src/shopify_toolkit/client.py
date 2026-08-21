@@ -1,9 +1,8 @@
 """Store-scoped Shopify Admin GraphQL client.
 
-Per CLAUDE.md principles #2 and #7: every client is built from an explicit
-ShopifyStore instance, so store A's token can never leak into store B's
-request. Rate-limit awareness (reading extensions.cost.throttleStatus) is
-built in here, not bolted on later.
+Every client is built from an explicit ShopifyStore instance, so store A's token can never leak
+into store B's request. Rate-limit awareness (reading extensions.cost.throttleStatus) is built
+in here, not bolted on later.
 """
 from __future__ import annotations
 
@@ -28,14 +27,12 @@ from .models import ShopifyStore
 
 logger = logging.getLogger(__name__)
 
-# A connection-pooled requests.Session per shop domain, reused across
-# ShopifyGraphQLClient instances so repeat calls to the same store don't
-# each pay a fresh TCP/TLS handshake. This is safe under CLAUDE.md
-# principle #2 despite being module-level state: no store-specific secret
-# is ever stored ON a Session (the access token is passed per-request via
-# the `headers=` kwarg in execute(), never via session.headers), and each
-# store's pool is kept strictly separate by domain key, so no store's
-# connections/state can cross into another's request.
+# A connection-pooled requests.Session per shop domain, reused across ShopifyGraphQLClient
+# instances so repeat calls to the same store don't each pay a fresh TCP/TLS handshake. Safe
+# despite being module-level state: no store-specific secret is ever stored ON a Session (the
+# access token is passed per-request via the `headers=` kwarg in execute(), never via
+# session.headers), and each store's pool is kept strictly separate by domain key, so no
+# store's connections/state can cross into another's request.
 #
 # Bounded (LRU-evicted) rather than an unbounded dict — a deployment
 # managing thousands of stores shouldn't accumulate one Session forever per
@@ -144,7 +141,9 @@ class ShopifyGraphQLClient:
 
         errors = body.get("errors")
         if errors:
-          
+            # Shopify doesn't always send the standard GraphQL errors array of dicts — an auth
+            # failure (401) sends a bare string instead. Normalize before it reaches
+            # _is_throttled() or the exception below.
             if isinstance(errors, str):
                 errors = [{"message": errors}]
             # THROTTLED is Shopify's cost-based rate-limit signal, surfaced

@@ -1,7 +1,7 @@
 """GraphQL mutation strings for the Product Images area.
 
-Scope-locked per CLAUDE.md: add image, remove image, reorder images. Uses
-Shopify's Media API — see queries.py's docstring for why.
+Covers: add image, remove image, reorder images. Uses Shopify's Media API
+— see queries.py's docstring for why.
 """
 
 ADD_PRODUCT_IMAGE_MUTATION = """

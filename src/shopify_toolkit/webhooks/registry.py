@@ -1,7 +1,6 @@
 """Register and list Shopify webhook subscriptions via GraphQL.
 
-Scope-locked per CLAUDE.md: register webhook subscription, list webhook
-subscriptions.
+Covers: register webhook subscription, list webhook subscriptions.
 """
 from __future__ import annotations
 

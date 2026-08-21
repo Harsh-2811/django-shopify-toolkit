@@ -1,8 +1,7 @@
 """GraphQL query and mutation strings for the Orders area.
 
-Scope-locked per CLAUDE.md: list orders, get single order, update
-order/fulfillment status. There's no separate mutations.py for this module
-(see "Package layout" in CLAUDE.md) — mutation strings live here too.
+Covers: list orders, get single order, update order/fulfillment status.
+There's no separate mutations.py for this module — mutation strings live here too.
 """
 
 ORDER_FIELDS_FRAGMENT = """

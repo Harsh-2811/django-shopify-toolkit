@@ -200,10 +200,9 @@ def test_ccg_exchange_skips_row_lock_on_non_locking_vendor(monkeypatch, ccg_stor
     "actually running against Postgres (e.g. skipped under tests.settings_mongodb)",
 )
 def test_ccg_exchange_uses_row_lock_on_postgresql(monkeypatch, ccg_store):
-    """Inverse sanity check of the test above: on a real row-locking vendor (this suite's actual
-    Postgres connection), the locked path must still be taken — transaction.atomic() actually
-    gets called, not silently skipped for every backend."""
-    assert connections["default"].vendor == "postgresql"  # sanity: confirms what's being tested
+    """Inverse of the test above: on a real row-locking vendor, the locked path must still be
+    taken — transaction.atomic() actually gets called, not silently skipped for every backend."""
+    assert connections["default"].vendor == "postgresql"
 
     calls = []
     real_atomic = transaction.atomic

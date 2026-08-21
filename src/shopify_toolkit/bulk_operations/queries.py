@@ -1,6 +1,6 @@
 """GraphQL query strings for the Bulk Operations area.
 
-Scope-locked per CLAUDE.md: check the current bulk operation's status.
+Covers: check the current bulk operation's status.
 Field shapes verified against shopify.dev's BulkOperation object reference.
 """
 

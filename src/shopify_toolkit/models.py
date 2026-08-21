@@ -1,10 +1,8 @@
 """Core models for django-shopify-toolkit.
 
-The fields specified in CLAUDE.md under "Data models" — do not add extra
-fields here without updating both CLAUDE.md and the migrations.
+Don't add extra fields here without a matching migration.
 
-ShopifyStore.client_id/client_secret/access_token_expires_at were added
-after the original CLAUDE.md schema was written, to support Shopify's
+ShopifyStore.client_id/client_secret/access_token_expires_at support Shopify's
 Client Credentials Grant: custom apps created via the Dev Dashboard from
 Jan 1, 2026 onward no longer expose a static access token in the admin UI —
 only a Client ID/Secret, which must be exchanged for a token that expires
@@ -13,6 +11,8 @@ keep using a static access_token as before; nothing changes for them.
 """
 from django.db import models
 from encrypted_model_fields.fields import EncryptedCharField
+
+from .conf import get_qualified_table_name
 
 
 class ShopifyStore(models.Model):
@@ -30,7 +30,7 @@ class ShopifyStore(models.Model):
         caches the result in access_token/access_token_expires_at,
         transparently refreshing it once it's close to expiring. This is
         per-store persisted state, not module-level shared state, so it
-        stays safe for multi-tenant use — see CLAUDE.md principle #2.
+        stays safe for multi-tenant use.
     """
 
     shop_domain = models.CharField(max_length=255, unique=True)
@@ -47,6 +47,8 @@ class ShopifyStore(models.Model):
     class Meta:
         verbose_name = "Shopify store"
         verbose_name_plural = "Shopify stores"
+        if _qualified := get_qualified_table_name("shopify_toolkit_shopifystore"):
+            db_table = _qualified
 
     def __str__(self) -> str:
         return self.shop_domain
@@ -66,6 +68,8 @@ class WebhookEvent(models.Model):
 
     class Meta:
         ordering = ["-received_at"]
+        if _qualified := get_qualified_table_name("shopify_toolkit_webhookevent"):
+            db_table = _qualified
 
     def __str__(self) -> str:
         return f"{self.topic} ({self.store.shop_domain})"

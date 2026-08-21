@@ -60,8 +60,13 @@ jobs:
           call_command('makemigrations', 'shopify_toolkit', '--check', '--dry-run')
           "
 
+      - name: Run dedicated-schema tests (SHOPIFY_TOOLKIT_DB_SCHEMA set)
+        
+        env:
+          DJANGO_SETTINGS_MODULE: tests.settings_dedicated_schema
+        run: python -m pytest tests/test_dedicated_schema.py -v
+
   test-mongodb:
-   
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
