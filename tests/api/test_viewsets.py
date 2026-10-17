@@ -67,17 +67,27 @@ def test_product_create_view_validates_input(shopify_store):
 
 
 @pytest.mark.django_db
-def test_product_retrieve_view_unknown_store_raises_does_not_exist():
+def test_product_retrieve_view_unknown_store_returns_404():
     view = ProductViewSet.as_view({"get": "retrieve"})
 
     unknown_pk = "ffffffffffffffffffffff99" if connection.vendor == "mongodb" else 999
 
     request = factory.get(f"/api/stores/{unknown_pk}/products/gid://shopify/Product/1/")
 
-    from shopify_toolkit.models import ShopifyStore
+    response = view(request, pk="gid://shopify/Product/1", store_pk=unknown_pk)
 
-    with pytest.raises(ShopifyStore.DoesNotExist):
-        view(request, pk="gid://shopify/Product/1", store_pk=unknown_pk)
+    assert response.status_code == 404
+
+
+@pytest.mark.django_db
+def test_inactive_store_returns_404(shopify_store):
+    shopify_store.is_active = False
+    shopify_store.save(update_fields=["is_active"])
+    view = CustomerViewSet.as_view({"get": "list"})
+
+    response = view(factory.get("/api/stores/1/customers/"), store_pk=shopify_store.pk)
+
+    assert response.status_code == 404
 
 
 @responses.activate
@@ -139,3 +149,64 @@ def test_customer_destroy_view_returns_204(shopify_store):
 
     assert response.status_code == 204
     assert json.loads(responses.calls[0].request.body)["variables"] == {"input": {"id": customer_id}}
+
+
+
+@pytest.mark.django_db
+@pytest.mark.parametrize("first", ["abc", "0", "-5", "251", "1.5"])
+def test_list_view_rejects_invalid_first_with_400(shopify_store, first):
+    view = ProductViewSet.as_view({"get": "list"})
+
+    response = view(factory.get("/api/stores/1/products/", {"first": first}), store_pk=shopify_store.pk)
+
+    assert response.status_code == 400
+    assert "first" in response.data
+
+
+@responses.activate
+@pytest.mark.django_db
+def test_list_view_accepts_max_page_size(shopify_store):
+    responses.add(
+        responses.POST,
+        ENDPOINT,
+        json={"data": {"products": {"edges": [], "pageInfo": {"hasNextPage": False, "endCursor": None}}}},
+        status=200,
+    )
+    view = ProductViewSet.as_view({"get": "list"})
+
+    response = view(factory.get("/api/stores/1/products/", {"first": "250"}), store_pk=shopify_store.pk)
+
+    assert response.status_code == 200
+    assert json.loads(responses.calls[0].request.body)["variables"]["first"] == 250
+
+
+@responses.activate
+@pytest.mark.django_db
+def test_shopify_user_error_returns_400_with_user_errors(shopify_store):
+    user_errors = [{"field": ["id"], "message": "Customer can't be deleted because they have orders"}]
+    responses.add(
+        responses.POST,
+        ENDPOINT,
+        json={"data": {"customerDelete": {"deletedCustomerId": None, "userErrors": user_errors}}},
+        status=200,
+    )
+    view = CustomerViewSet.as_view({"delete": "destroy"})
+    customer_id = "gid://shopify/Customer/1"
+
+    response = view(factory.delete(f"/api/stores/1/customers/{customer_id}/"), pk=customer_id, store_pk=shopify_store.pk)
+
+    assert response.status_code == 400
+    assert response.data["user_errors"] == user_errors
+
+
+@responses.activate
+@pytest.mark.django_db
+def test_graphql_error_is_not_turned_into_400(shopify_store):
+    """Only ShopifyUserError (bad input) maps to 400 — a GraphQL/server error must still propagate."""
+    from shopify_toolkit.exceptions import ShopifyGraphQLError
+
+    responses.add(responses.POST, ENDPOINT, json={"errors": [{"message": "boom"}]}, status=200)
+    view = CustomerViewSet.as_view({"get": "list"})
+
+    with pytest.raises(ShopifyGraphQLError):
+        view(factory.get("/api/stores/1/customers/"), store_pk=shopify_store.pk)

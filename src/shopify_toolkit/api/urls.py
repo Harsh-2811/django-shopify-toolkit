@@ -2,7 +2,9 @@
 
 Every endpoint is nested under a store: /stores/<store_pk>/products/, etc.
 Detail routes use the `path` converter for `pk` because Shopify GraphQL IDs
-(e.g. "gid://shopify/Product/123") contain slashes.
+(e.g. "gid://shopify/Product/123") contain slashes. That converter also matches a trailing
+action segment, so any `<path:pk>/<action>/` route must be listed *before* its plain
+`<path:pk>/` detail route — otherwise the detail route swallows it (pk="gid://.../fulfill").
 """
 from django.urls import path
 
@@ -28,8 +30,8 @@ urlpatterns = [
     path("stores/<int:store_pk>/products/", product_list, name="product-list"),
     path("stores/<int:store_pk>/products/<path:pk>/", product_detail, name="product-detail"),
     path("stores/<int:store_pk>/orders/", order_list, name="order-list"),
-    path("stores/<int:store_pk>/orders/<path:pk>/", order_detail, name="order-detail"),
     path("stores/<int:store_pk>/orders/<path:pk>/fulfill/", order_fulfill, name="order-fulfill"),
+    path("stores/<int:store_pk>/orders/<path:pk>/", order_detail, name="order-detail"),
     path("stores/<int:store_pk>/customers/", customer_list, name="customer-list"),
     path("stores/<int:store_pk>/customers/<path:pk>/", customer_detail, name="customer-detail"),
 ]

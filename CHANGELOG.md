@@ -21,6 +21,16 @@ All notable changes to this project are documented in this file.
   public API change.
 
 ### Fixed
+- REST: `POST /api/stores/<store_pk>/orders/<pk>/fulfill/` was unreachable —
+  the `orders/<path:pk>/` detail route was listed first and, since `path`
+  matches slashes, captured it as `pk=".../fulfill"`. The fulfill route is
+  now registered before the detail route.
+- REST: an unknown or inactive `store_pk` returns 404 instead of an
+  unhandled `ShopifyStore.DoesNotExist` (500).
+- REST: a non-integer or out-of-range `?first=` (outside 1–250, Shopify's
+  limit) returns 400 instead of a 500 / GraphQL error.
+- REST: `ShopifyUserError` (Shopify rejected the input) returns 400 with
+  `{"detail": ..., "user_errors": [...]}` instead of a 500.
 - `iter_all_products`/`iter_all_orders`/`iter_all_customers` raise
   `ShopifyToolkitError` instead of looping forever if Shopify reports
   `hasNextPage: true` with a missing or repeated `endCursor`.
