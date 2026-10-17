@@ -1,6 +1,7 @@
 import pytest
 import responses
 from requests.exceptions import ConnectionError as RequestsConnectionError
+from requests.exceptions import ReadTimeout
 
 from shopify_toolkit.client import ShopifyGraphQLClient
 from shopify_toolkit.exceptions import (
@@ -429,3 +430,63 @@ def test_parse_retry_after(value, expected):
     from shopify_toolkit.client import _parse_retry_after
 
     assert _parse_retry_after(value) == expected
+
+
+@responses.activate
+@pytest.mark.django_db
+def test_execute_query_retries_read_timeout(shopify_store, monkeypatch, settings):
+    settings.SHOPIFY_TOOLKIT_MAX_RETRIES = 1
+    monkeypatch.setattr("shopify_toolkit.client.time.sleep", lambda s: None)
+
+    responses.add(responses.POST, ENDPOINT, body=ReadTimeout("slow"))
+    responses.add(responses.POST, ENDPOINT, json={"data": {"shop": {"name": "Recovered"}}}, status=200)
+
+    data = ShopifyGraphQLClient(shopify_store).execute("query { shop { name } }")
+
+    assert data == {"shop": {"name": "Recovered"}}
+    assert len(responses.calls) == 2
+
+
+@responses.activate
+@pytest.mark.django_db
+def test_execute_mutation_is_not_retried_on_read_timeout(shopify_store, monkeypatch, settings):
+    """The request was sent; a read timeout doesn't mean it wasn't applied."""
+    settings.SHOPIFY_TOOLKIT_MAX_RETRIES = 3
+    monkeypatch.setattr("shopify_toolkit.client.time.sleep", lambda s: None)
+    responses.add(responses.POST, ENDPOINT, body=ReadTimeout("slow"))
+
+    with pytest.raises(ShopifyRequestError, match="may already have been applied"):
+        ShopifyGraphQLClient(shopify_store).execute("mutation { tagsAdd { userErrors { message } } }")
+
+    assert len(responses.calls) == 1
+
+
+@responses.activate
+@pytest.mark.django_db
+def test_execute_mutation_still_retries_connection_error(shopify_store, monkeypatch, settings):
+    """A refused connection never reached Shopify, so retrying a mutation is safe."""
+    settings.SHOPIFY_TOOLKIT_MAX_RETRIES = 1
+    monkeypatch.setattr("shopify_toolkit.client.time.sleep", lambda s: None)
+
+    responses.add(responses.POST, ENDPOINT, body=RequestsConnectionError("refused"))
+    responses.add(responses.POST, ENDPOINT, json={"data": {"tagsAdd": {"userErrors": []}}}, status=200)
+
+    ShopifyGraphQLClient(shopify_store).execute("mutation { tagsAdd { userErrors { message } } }")
+
+    assert len(responses.calls) == 2
+
+
+@responses.activate
+@pytest.mark.django_db
+def test_retry_log_includes_reason(shopify_store, monkeypatch, settings, caplog):
+    settings.SHOPIFY_TOOLKIT_MAX_RETRIES = 1
+    monkeypatch.setattr("shopify_toolkit.client.time.sleep", lambda s: None)
+
+    responses.add(responses.POST, ENDPOINT, body="<html>Bad Gateway</html>", status=502)
+    responses.add(responses.POST, ENDPOINT, json={"data": {"shop": {"name": "Recovered"}}}, status=200)
+
+    with caplog.at_level("INFO", logger="shopify_toolkit.client"):
+        ShopifyGraphQLClient(shopify_store).execute("query { shop { name } }")
+
+    assert "HTTP 502" in caplog.text
+    assert "test-store.myshopify.com" in caplog.text

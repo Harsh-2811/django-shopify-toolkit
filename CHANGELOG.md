@@ -14,6 +14,10 @@ All notable changes to this project are documented in this file.
 - HTTP 502/503/504 responses are retried for queries. Mutations are
   deliberately not retried on these — a gateway timeout doesn't guarantee
   the write wasn't applied.
+- A read timeout is no longer retried for mutations — the request was
+  already sent and may have been applied. Queries still retry it, and
+  mutations still retry errors where the request never reached Shopify
+  (e.g. connection refused).
 - Retry backoff (`2 ** (attempt - 1)`) is now clamped to
   `SHOPIFY_TOOLKIT_MAX_BACKOFF_SECONDS`, as that setting was already
   documented to do. Previously only the cost-bucket backoff was capped, so

@@ -112,7 +112,10 @@ class ShopifyGraphQLClient:
 
         Retried, up to SHOPIFY_TOOLKIT_MAX_RETRIES times with capped
         exponential backoff:
-          * network errors (connection refused, timeouts, ...)
+          * network errors (connection refused, timeouts, ...) — except a
+            read timeout on a mutation: the request was already sent and may
+            have been applied, so it's surfaced rather than risk a duplicate
+            write.
           * throttling (HTTP 429 or a THROTTLED GraphQL error) — Shopify
             rejects these before executing anything, so retrying is safe even
             for mutations. Retry-After is honoured when present.
@@ -132,6 +135,20 @@ class ShopifyGraphQLClient:
                     headers=self._headers(),
                     timeout=self._timeout,
                 )
+            except requests.ReadTimeout as exc:
+                if is_mutation:
+                    raise ShopifyRequestError(
+                        f"Mutation to {self.endpoint} timed out waiting for a response; not "
+                        f"retried since it may already have been applied: {exc}"
+                    ) from exc
+                if attempt >= self._max_retries:
+                    raise ShopifyRequestError(
+                        f"Request to {self.endpoint} failed after {self._max_retries} "
+                        f"retries: {exc}"
+                    ) from exc
+                attempt += 1
+                self._sleep_backoff(attempt, reason=type(exc).__name__)
+                continue
             except requests.RequestException as exc:
                 if attempt >= self._max_retries:
                     raise ShopifyRequestError(
@@ -139,7 +156,7 @@ class ShopifyGraphQLClient:
                         f"retries: {exc}"
                     ) from exc
                 attempt += 1
-                self._sleep_backoff(attempt)
+                self._sleep_backoff(attempt, reason=type(exc).__name__)
                 continue
 
             if (
@@ -148,7 +165,7 @@ class ShopifyGraphQLClient:
                 and attempt < self._max_retries
             ):
                 attempt += 1
-                self._sleep_backoff(attempt)
+                self._sleep_backoff(attempt, reason=f"HTTP {response.status_code}")
                 continue
 
             try:
@@ -157,7 +174,7 @@ class ShopifyGraphQLClient:
                 if attempt >= self._max_retries:
                     raise
                 attempt += 1
-                self._sleep_backoff(attempt, retry_after=exc.retry_after)
+                self._sleep_backoff(attempt, reason="throttled", retry_after=exc.retry_after)
 
     def _handle_response(self, response: requests.Response) -> dict[str, Any]:
         if response.status_code == 429:
@@ -223,12 +240,20 @@ class ShopifyGraphQLClient:
             )
             time.sleep(sleep_for)
 
-    def _sleep_backoff(self, attempt: int, *, retry_after: str | None = None) -> None:
+    def _sleep_backoff(
+        self, attempt: int, *, reason: str, retry_after: str | None = None
+    ) -> None:
         delay = _parse_retry_after(retry_after)
         if delay is None:
             delay = 2 ** (attempt - 1)
         delay = min(delay, self._max_backoff)
-        logger.info("Retrying Shopify request (attempt %s) after %.2fs", attempt, delay)
+        logger.info(
+            "Retrying Shopify request to %s (attempt %s, %s) after %.2fs",
+            self.store.shop_domain,
+            attempt,
+            reason,
+            delay,
+        )
         time.sleep(delay)
 
 
