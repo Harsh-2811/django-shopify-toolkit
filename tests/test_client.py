@@ -249,3 +249,183 @@ def test_session_pool_evicts_least_recently_used_beyond_max_size(settings, monke
     assert "evict-b.myshopify.com" not in _session_pool
     assert close_calls == [session_b]  # evicted session must be closed, not just dropped
     _session_pool.clear()
+
+
+@responses.activate
+@pytest.mark.django_db
+def test_execute_throttled_error_retries_then_succeeds(shopify_store, monkeypatch, settings):
+    settings.SHOPIFY_TOOLKIT_MAX_RETRIES = 2
+    sleeps = []
+    monkeypatch.setattr("shopify_toolkit.client.time.sleep", lambda s: sleeps.append(s))
+
+    responses.add(
+        responses.POST,
+        ENDPOINT,
+        json={"errors": [{"message": "Throttled", "extensions": {"code": "THROTTLED"}}]},
+        status=200,
+    )
+    responses.add(responses.POST, ENDPOINT, json={"data": {"shop": {"name": "Recovered"}}}, status=200)
+
+    client = ShopifyGraphQLClient(shopify_store)
+    data = client.execute("query { shop { name } }")
+
+    assert data == {"shop": {"name": "Recovered"}}
+    assert len(responses.calls) == 2
+    assert sleeps == [1]
+
+
+@responses.activate
+@pytest.mark.django_db
+def test_execute_throttled_raises_after_exhausting_retries(shopify_store, monkeypatch, settings):
+    settings.SHOPIFY_TOOLKIT_MAX_RETRIES = 2
+    monkeypatch.setattr("shopify_toolkit.client.time.sleep", lambda s: None)
+    responses.add(
+        responses.POST,
+        ENDPOINT,
+        json={"errors": [{"message": "Throttled", "extensions": {"code": "THROTTLED"}}]},
+        status=200,
+    )
+
+    client = ShopifyGraphQLClient(shopify_store)
+    with pytest.raises(ShopifyRateLimitError):
+        client.execute("query { shop { name } }")
+
+    assert len(responses.calls) == 3  # initial attempt + 2 retries
+
+
+@responses.activate
+@pytest.mark.django_db
+def test_execute_http_429_honours_retry_after(shopify_store, monkeypatch, settings):
+    settings.SHOPIFY_TOOLKIT_MAX_RETRIES = 1
+    sleeps = []
+    monkeypatch.setattr("shopify_toolkit.client.time.sleep", lambda s: sleeps.append(s))
+
+    responses.add(responses.POST, ENDPOINT, status=429, headers={"Retry-After": "2.0"})
+    responses.add(responses.POST, ENDPOINT, json={"data": {"shop": {"name": "Recovered"}}}, status=200)
+
+    client = ShopifyGraphQLClient(shopify_store)
+    data = client.execute("query { shop { name } }")
+
+    assert data == {"shop": {"name": "Recovered"}}
+    assert sleeps == [2.0]
+
+
+@responses.activate
+@pytest.mark.django_db
+def test_execute_http_429_retry_after_is_capped_at_max_backoff(shopify_store, monkeypatch, settings):
+    settings.SHOPIFY_TOOLKIT_MAX_RETRIES = 1
+    settings.SHOPIFY_TOOLKIT_MAX_BACKOFF_SECONDS = 3
+    sleeps = []
+    monkeypatch.setattr("shopify_toolkit.client.time.sleep", lambda s: sleeps.append(s))
+
+    responses.add(responses.POST, ENDPOINT, status=429, headers={"Retry-After": "60"})
+    responses.add(responses.POST, ENDPOINT, json={"data": {"shop": {"name": "Recovered"}}}, status=200)
+
+    ShopifyGraphQLClient(shopify_store).execute("query { shop { name } }")
+
+    assert sleeps == [3]
+
+
+@responses.activate
+@pytest.mark.django_db
+def test_execute_throttled_mutation_is_retried(shopify_store, monkeypatch, settings):
+    """Throttled requests are rejected before execution, so even a mutation is safe to retry."""
+    settings.SHOPIFY_TOOLKIT_MAX_RETRIES = 1
+    monkeypatch.setattr("shopify_toolkit.client.time.sleep", lambda s: None)
+
+    responses.add(responses.POST, ENDPOINT, status=429)
+    responses.add(responses.POST, ENDPOINT, json={"data": {"tagsAdd": {"userErrors": []}}}, status=200)
+
+    data = ShopifyGraphQLClient(shopify_store).execute("mutation { tagsAdd { userErrors { message } } }")
+
+    assert data == {"tagsAdd": {"userErrors": []}}
+    assert len(responses.calls) == 2
+
+
+@responses.activate
+@pytest.mark.django_db
+@pytest.mark.parametrize("status", [502, 503, 504])
+def test_execute_query_retries_gateway_errors(shopify_store, monkeypatch, settings, status):
+    settings.SHOPIFY_TOOLKIT_MAX_RETRIES = 2
+    sleeps = []
+    monkeypatch.setattr("shopify_toolkit.client.time.sleep", lambda s: sleeps.append(s))
+
+    responses.add(responses.POST, ENDPOINT, body="<html>Bad Gateway</html>", status=status)
+    responses.add(responses.POST, ENDPOINT, json={"data": {"shop": {"name": "Recovered"}}}, status=200)
+
+    data = ShopifyGraphQLClient(shopify_store).execute("query { shop { name } }")
+
+    assert data == {"shop": {"name": "Recovered"}}
+    assert sleeps == [1]
+
+
+@responses.activate
+@pytest.mark.django_db
+def test_execute_query_gateway_error_raises_after_exhausting_retries(shopify_store, monkeypatch, settings):
+    settings.SHOPIFY_TOOLKIT_MAX_RETRIES = 2
+    monkeypatch.setattr("shopify_toolkit.client.time.sleep", lambda s: None)
+    responses.add(responses.POST, ENDPOINT, body="<html>Service Unavailable</html>", status=503)
+
+    with pytest.raises(ShopifyRequestError, match="503"):
+        ShopifyGraphQLClient(shopify_store).execute("query { shop { name } }")
+
+    assert len(responses.calls) == 3
+
+
+@responses.activate
+@pytest.mark.django_db
+def test_execute_mutation_is_not_retried_on_gateway_error(shopify_store, monkeypatch, settings):
+    """A 504 on a mutation may mean it was applied — retrying could duplicate the write."""
+    settings.SHOPIFY_TOOLKIT_MAX_RETRIES = 3
+    monkeypatch.setattr("shopify_toolkit.client.time.sleep", lambda s: None)
+    responses.add(responses.POST, ENDPOINT, body="<html>Gateway Timeout</html>", status=504)
+
+    from shopify_toolkit.customers.queries import CREATE_CUSTOMER_MUTATION
+
+    with pytest.raises(ShopifyRequestError):
+        ShopifyGraphQLClient(shopify_store).execute(CREATE_CUSTOMER_MUTATION, {"input": {}})
+
+    assert len(responses.calls) == 1
+
+
+@responses.activate
+@pytest.mark.django_db
+def test_network_retry_backoff_is_capped_at_max_backoff(shopify_store, monkeypatch, settings):
+    settings.SHOPIFY_TOOLKIT_MAX_RETRIES = 4
+    settings.SHOPIFY_TOOLKIT_MAX_BACKOFF_SECONDS = 3
+    sleeps = []
+    monkeypatch.setattr("shopify_toolkit.client.time.sleep", lambda s: sleeps.append(s))
+
+    for _ in range(4):
+        responses.add(responses.POST, ENDPOINT, body=RequestsConnectionError("boom"))
+    responses.add(responses.POST, ENDPOINT, json={"data": {"shop": {"name": "Recovered"}}}, status=200)
+
+    ShopifyGraphQLClient(shopify_store).execute("query { shop { name } }")
+
+    assert sleeps == [1, 2, 3, 3]  # 2**2=4 and 2**3=8 clamped to the 3s cap
+
+
+@pytest.mark.parametrize(
+    "query, expected",
+    [
+        ("query { shop { name } }", False),
+        ("{ shop { name } }", False),
+        ("mutation { tagsAdd { userErrors { message } } }", True),
+        ("fragment F on Customer { id }\nmutation CreateCustomer { x }", True),
+        ("query Q { shop { description } }  # mutation in a comment mid-line", False),
+    ],
+)
+def test_is_mutation(query, expected):
+    from shopify_toolkit.client import _is_mutation
+
+    assert _is_mutation(query) is expected
+
+
+@pytest.mark.parametrize(
+    "value, expected",
+    [(None, None), ("", None), ("2", 2.0), ("1.5", 1.5), ("-4", 0.0), ("Wed, 21 Oct 2026 07:28:00 GMT", None)],
+)
+def test_parse_retry_after(value, expected):
+    from shopify_toolkit.client import _parse_retry_after
+
+    assert _parse_retry_after(value) == expected

@@ -2,6 +2,23 @@
 
 All notable changes to this project are documented in this file.
 
+## [Unreleased]
+
+### Fixed
+- `ShopifyGraphQLClient` now retries throttled requests (HTTP 429 or a
+  `THROTTLED` GraphQL error) instead of raising `ShopifyRateLimitError` on
+  the first one, honouring Shopify's `Retry-After` header when present.
+  Throttled requests are rejected before execution, so mutations are retried
+  too. `ShopifyRateLimitError` is still raised once `SHOPIFY_TOOLKIT_MAX_RETRIES`
+  is exhausted.
+- HTTP 502/503/504 responses are retried for queries. Mutations are
+  deliberately not retried on these — a gateway timeout doesn't guarantee
+  the write wasn't applied.
+- Retry backoff (`2 ** (attempt - 1)`) is now clamped to
+  `SHOPIFY_TOOLKIT_MAX_BACKOFF_SECONDS`, as that setting was already
+  documented to do. Previously only the cost-bucket backoff was capped, so
+  a high `SHOPIFY_TOOLKIT_MAX_RETRIES` could block a worker for minutes.
+
 ## [1.1.0] - Unreleased
 
 ### Added

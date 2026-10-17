@@ -152,7 +152,7 @@ in this package reads `django.conf.settings` directly anywhere else.
 |---|---|---|
 | `SHOPIFY_TOOLKIT_API_SECRET` | *(none — required for webhooks)* | HMAC secret used to verify incoming webhook signatures. |
 | `SHOPIFY_TOOLKIT_API_VERSION` | `"2026-07"` | Default Shopify Admin API version for stores that don't set their own `api_version`. Shopify supports each version ~12 months — check this isn't stale. |
-| `SHOPIFY_TOOLKIT_MAX_RETRIES` | `3` | Retry attempts for transient network errors in `ShopifyGraphQLClient`. |
+| `SHOPIFY_TOOLKIT_MAX_RETRIES` | `3` | Retry attempts in `ShopifyGraphQLClient` for network errors, throttling (HTTP 429 / `THROTTLED`, honouring `Retry-After`), and — for queries only, never mutations — HTTP 502/503/504. |
 | `SHOPIFY_TOOLKIT_RATE_LIMIT_BUFFER` | `100` | Pause outgoing requests once Shopify's cost-throttle bucket drops below this. |
 | `SHOPIFY_TOOLKIT_MAX_BACKOFF_SECONDS` | `10` | Cap on any single blocking sleep (retry or rate-limit backoff), so a slow Shopify can't tie up a sync worker indefinitely. |
 | `SHOPIFY_TOOLKIT_REQUEST_TIMEOUT` | `30` | Per-request timeout (seconds) for GraphQL calls and token exchanges. |
