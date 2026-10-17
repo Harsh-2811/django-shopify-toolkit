@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import collections
 import logging
+import re
 import threading
 import time
 from typing import Any
@@ -26,6 +27,16 @@ from .exceptions import ShopifyGraphQLError, ShopifyRateLimitError, ShopifyReque
 from .models import ShopifyStore
 
 logger = logging.getLogger(__name__)
+
+# Gateway-level failures Shopify returns while the request never reached (or never finished in)
+# the API itself — worth retrying for a read. Not 500: that usually means the query itself
+# tripped something server-side, and retrying it just repeats the failure.
+_RETRYABLE_STATUS_CODES = frozenset({502, 503, 504})
+
+# Matches a top-level `mutation` operation definition. Anchored to the start of a line rather
+# than the start of the string because this package's query strings prepend fragment
+# definitions (e.g. CUSTOMER_FIELDS_FRAGMENT + "mutation CreateCustomer...").
+_MUTATION_RE = re.compile(r"^\s*mutation\b", re.MULTILINE)
 
 # A connection-pooled requests.Session per shop domain, reused across ShopifyGraphQLClient
 # instances so repeat calls to the same store don't each pay a fresh TCP/TLS handshake. Safe
@@ -96,14 +107,27 @@ class ShopifyGraphQLClient:
         Returns the "data" portion of a successful response. Raises
         ShopifyGraphQLError if the response body has an "errors" array (and
         it isn't a throttling error), ShopifyRateLimitError if the request
-        was throttled, and ShopifyRequestError if the transport itself fails
-        after all retries are exhausted.
+        was still throttled after all retries, and ShopifyRequestError if the
+        transport itself fails after all retries are exhausted.
+
+        Retried, up to SHOPIFY_TOOLKIT_MAX_RETRIES times with capped
+        exponential backoff:
+          * network errors (connection refused, timeouts, ...) — except a
+            read timeout on a mutation: the request was already sent and may
+            have been applied, so it's surfaced rather than risk a duplicate
+            write.
+          * throttling (HTTP 429 or a THROTTLED GraphQL error) — Shopify
+            rejects these before executing anything, so retrying is safe even
+            for mutations. Retry-After is honoured when present.
+          * HTTP 502/503/504 — queries only. A mutation that hit a gateway
+            timeout may still have been applied, so it's surfaced to the
+            caller instead of risking a duplicate write.
         """
         payload = {"query": query, "variables": variables or {}}
+        is_mutation = _is_mutation(query)
 
         attempt = 0
-        last_exc: Exception | None = None
-        while attempt <= self._max_retries:
+        while True:
             try:
                 response = self._session.post(
                     self.endpoint,
@@ -111,19 +135,46 @@ class ShopifyGraphQLClient:
                     headers=self._headers(),
                     timeout=self._timeout,
                 )
-            except requests.RequestException as exc:
-                last_exc = exc
+            except requests.ReadTimeout as exc:
+                if is_mutation:
+                    raise ShopifyRequestError(
+                        f"Mutation to {self.endpoint} timed out waiting for a response; not "
+                        f"retried since it may already have been applied: {exc}"
+                    ) from exc
+                if attempt >= self._max_retries:
+                    raise ShopifyRequestError(
+                        f"Request to {self.endpoint} failed after {self._max_retries} "
+                        f"retries: {exc}"
+                    ) from exc
                 attempt += 1
-                if attempt > self._max_retries:
-                    break
-                self._sleep_backoff(attempt)
+                self._sleep_backoff(attempt, reason=type(exc).__name__)
+                continue
+            except requests.RequestException as exc:
+                if attempt >= self._max_retries:
+                    raise ShopifyRequestError(
+                        f"Request to {self.endpoint} failed after {self._max_retries} "
+                        f"retries: {exc}"
+                    ) from exc
+                attempt += 1
+                self._sleep_backoff(attempt, reason=type(exc).__name__)
                 continue
 
-            return self._handle_response(response)
+            if (
+                response.status_code in _RETRYABLE_STATUS_CODES
+                and not is_mutation
+                and attempt < self._max_retries
+            ):
+                attempt += 1
+                self._sleep_backoff(attempt, reason=f"HTTP {response.status_code}")
+                continue
 
-        raise ShopifyRequestError(
-            f"Request to {self.endpoint} failed after {self._max_retries} retries: {last_exc}"
-        )
+            try:
+                return self._handle_response(response)
+            except ShopifyRateLimitError as exc:
+                if attempt >= self._max_retries:
+                    raise
+                attempt += 1
+                self._sleep_backoff(attempt, reason="throttled", retry_after=exc.retry_after)
 
     def _handle_response(self, response: requests.Response) -> dict[str, Any]:
         if response.status_code == 429:
@@ -189,10 +240,40 @@ class ShopifyGraphQLClient:
             )
             time.sleep(sleep_for)
 
-    def _sleep_backoff(self, attempt: int) -> None:
-        delay = 2 ** (attempt - 1)
-        logger.info("Retrying Shopify request (attempt %s) after %.2fs", attempt, delay)
+    def _sleep_backoff(
+        self, attempt: int, *, reason: str, retry_after: str | None = None
+    ) -> None:
+        delay = _parse_retry_after(retry_after)
+        if delay is None:
+            delay = 2 ** (attempt - 1)
+        delay = min(delay, self._max_backoff)
+        logger.info(
+            "Retrying Shopify request to %s (attempt %s, %s) after %.2fs",
+            self.store.shop_domain,
+            attempt,
+            reason,
+            delay,
+        )
         time.sleep(delay)
+
+
+def _is_mutation(query: str) -> bool:
+    return _MUTATION_RE.search(query) is not None
+
+
+def _parse_retry_after(value: str | None) -> float | None:
+    """Seconds from a Retry-After header, or None if absent/unparseable.
+
+    Shopify sends a plain number of seconds (e.g. "2.0"); the HTTP-date form isn't used by the
+    Admin API, so it's treated as unparseable and falls back to exponential backoff.
+    """
+    if not value:
+        return None
+    try:
+        seconds = float(value)
+    except ValueError:
+        return None
+    return max(seconds, 0.0)
 
 
 def _is_throttled(errors: list) -> bool:
