@@ -42,6 +42,7 @@ class ProductViewSet(StoreScopedViewSet):
             store,
             first=int(request.query_params.get("first", 50)),
             after=request.query_params.get("after"),
+            query=request.query_params.get("query") or None,
         )
         return Response(
             {
@@ -85,6 +86,7 @@ class OrderViewSet(StoreScopedViewSet):
             store,
             first=int(request.query_params.get("first", 50)),
             after=request.query_params.get("after"),
+            query=request.query_params.get("query") or None,
         )
         return Response(
             {
@@ -122,6 +124,7 @@ class CustomerViewSet(StoreScopedViewSet):
             store,
             first=int(request.query_params.get("first", 50)),
             after=request.query_params.get("after"),
+            query=request.query_params.get("query") or None,
         )
         return Response(
             {
@@ -153,3 +156,8 @@ class CustomerViewSet(StoreScopedViewSet):
             store, customer_id=pk, **serializer.validated_data
         )
         return Response(CustomerSerializer(customer).data)
+
+    def destroy(self, request, pk=None, store_pk=None):
+        store = self.get_store()
+        customer_services.delete_customer(store, pk)
+        return Response(status=status.HTTP_204_NO_CONTENT)

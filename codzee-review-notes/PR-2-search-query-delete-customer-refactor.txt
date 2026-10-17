@@ -1,0 +1,120 @@
+PR 2 - Search query filter, delete_customer, and the shared helpers refactor
+My notes on the Codzee review
+=============================================================================
+
+This PR ended up holding two pieces of work: the feature (query= filter
+and delete_customer) and the refactor (shared raise_for_user_errors and
+iter_pages helpers). I pushed the refactor to the same branch by mistake,
+so Codzee reviewed both together.
+
+Codzee approved it with 3 minor comments. I checked each one. All 3 are
+real, but I only fixed 2 of them in this PR, and I think one was put in
+the wrong category.
+
+
+1. "Deleting customer with orders returns 500" (Bug, Minor, P0)
+---------------------------------------------------------------
+
+Verdict: Agree it's a bug. Not fixing it in this PR.
+
+It's true. On this branch, if Shopify refuses to delete a customer
+because they have orders, the ShopifyUserError is not caught and the API
+returns a 500.
+
+Why I'm not fixing it here:
+- PR 4 (fix/api-routing-and-error-handling) is stacked on top of this
+  branch and already fixes it in a better place. It maps ShopifyUserError
+  to a 400 with the user_errors in the shared base viewset, so every
+  endpoint gets it, not just customer delete. Fixing it here with a
+  one-off try/except would just get replaced by PR 4.
+- Codzee has no way to know about PR 4, which is fair. But stacked PRs
+  are common, and it would be nice if the review could see "this is
+  handled in a PR that builds on this branch" or at least check open PRs
+  that touch the same file.
+
+Where I disagree:
+- Product delete has the exact same problem (it existed before this
+  PR), and Codzee only flagged the customer one, probably because only
+  that line is in the diff. It's the same bug in the same file, ten lines
+  apart. Saying "the existing product destroy has the same issue" would
+  have made the comment more useful, and it would have pointed at the
+  right fix (handle it once in the base class) instead of a local
+  try/except.
+- Like in PR 1, "Same root cause also at tests/api/test_viewsets.py:141"
+  points at a test that is correct. The test checks the happy path (204).
+  What's missing is a test for the error path. Calling that "same root
+  cause" is confusing.
+
+
+2. "Repeated-cursor test only covers one shape" (Test gap, Minor, P0)
+---------------------------------------------------------------------
+
+Verdict: Agree, but this is a code bug, not a test gap.
+
+Codzee is right that a cursor cycle like A -> B -> A would still loop
+forever. iter_pages only compared the new cursor with the previous one.
+
+Where I disagree:
+- It's labelled "Test gap". The real problem is that the code doesn't
+  handle the case, and the CHANGELOG promises it does. Adding a test
+  alone would just give you a test that hangs forever. Labelling it as
+  a test gap makes it look less important than it is. It should have
+  been "Bug" with "and add a test for it" as part of the fix.
+- To be fair on how likely this is: Shopify cursors are opaque and only
+  move forward, so a real cycle is very unlikely. Minor is the right
+  severity. But this guard exists exactly for "Shopify does something
+  weird", so it should be done properly.
+
+What I did: iter_pages now remembers every cursor it has already used
+and stops if one comes back, not just the last one. Added a test for
+A -> B -> A, and updated the CHANGELOG wording.
+
+
+3. "iter_all_orders query forwarding untested" (Test gap, Minor, P0)
+--------------------------------------------------------------------
+
+Verdict: Agree fully.
+
+iter_all_orders and iter_all_products pass query= through a lambda into
+iter_pages, and nothing tested it. If someone dropped query= from one of
+those lambdas, every test would still pass. Only iter_all_customers had
+a test. Good catch, and pointing at the existing customers test as the
+pattern to copy made it a 5 minute fix.
+
+What I did: added the same two-page test for iter_all_orders and
+iter_all_products. It checks that query is sent on both pages and that
+the cursor moves forward.
+
+
+What Codzee did not flag
+------------------------
+
+- The PR mixes a feature and a refactor (my mistake when pushing). I
+  would have liked a note like "this PR has two unrelated changes,
+  consider splitting". That's a normal thing for a human reviewer to say.
+- The REST list endpoints still do int(request.query_params["first"]),
+  so ?first=abc returns a 500. This PR changed those exact lines (to add
+  ?query=) and Codzee didn't mention it. It's the same kind of "returns
+  500 instead of 400" issue it did flag for delete. (Also fixed in PR 4.)
+- The refactor changed iter_all_* from generators into plain functions
+  that return a generator. It works the same for callers, but the
+  docstrings still say "Yield every...". Very small, I didn't expect a
+  comment on that.
+
+
+Overall
+-------
+
+Useful review. The test gap comments were specific and easy to act on.
+The best part is that it read the CHANGELOG and checked the code against
+what the CHANGELOG promises. That's how it found both test gaps.
+
+My concerns:
+- The category was wrong on comment 2. A real infinite loop was filed as
+  a test gap.
+- It reviews the diff lines and misses the same bug a few lines away in
+  code the PR didn't touch (product destroy, ?first=).
+- It has no awareness of stacked PRs.
+- "Approved" with an open comment labelled "Bug" felt a bit mixed.
+  I think it's the right call here because it's minor, but a short line
+  saying why it's OK to merge with that open would help.

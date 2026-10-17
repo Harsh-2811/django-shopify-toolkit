@@ -1,7 +1,7 @@
 """GraphQL query and mutation strings for the Customers area.
 
 Covers: list customers, get single customer, create customer, update
-customer. No separate mutations.py for this module — mutation strings live here too.
+customer, delete customer. No separate mutations.py for this module — mutation strings live here too.
 """
 
 CUSTOMER_FIELDS_FRAGMENT = """
@@ -20,8 +20,8 @@ fragment CustomerFields on Customer {
 LIST_CUSTOMERS_QUERY = (
     CUSTOMER_FIELDS_FRAGMENT
     + """
-query ListCustomers($first: Int!, $after: String) {
-    customers(first: $first, after: $after) {
+query ListCustomers($first: Int!, $after: String, $query: String) {
+    customers(first: $first, after: $after, query: $query) {
         edges {
             cursor
             node {
@@ -81,3 +81,15 @@ mutation UpdateCustomer($input: CustomerInput!) {
 }
 """
 )
+
+DELETE_CUSTOMER_MUTATION = """
+mutation DeleteCustomer($input: CustomerDeleteInput!) {
+    customerDelete(input: $input) {
+        deletedCustomerId
+        userErrors {
+            field
+            message
+        }
+    }
+}
+"""

@@ -8,9 +8,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Iterator
 
-from .._utils import camelize_keys
+from .._utils import camelize_keys, iter_pages, parse_page_info, raise_for_user_errors
 from ..client import ShopifyGraphQLClient
-from ..exceptions import ShopifyUserError
 from ..models import ShopifyStore
 from .queries import (
     FULFILL_ORDER_MUTATION,
@@ -55,36 +54,37 @@ def _parse_order(node: dict) -> Order:
     )
 
 
-def _raise_for_user_errors(user_errors: list) -> None:
-    if user_errors:
-        raise ShopifyUserError(
-            f"Shopify returned userErrors: {user_errors}", user_errors=user_errors
-        )
+def list_orders(
+    store: ShopifyStore,
+    *,
+    first: int = 50,
+    after: str | None = None,
+    query: str | None = None,
+) -> OrderPage:
+    """List orders for a store, paginated.
 
-
-def list_orders(store: ShopifyStore, *, first: int = 50, after: str | None = None) -> OrderPage:
-    """List orders for a store, paginated."""
+    `query` is passed through as Shopify's search syntax, e.g.
+    "financial_status:paid created_at:>=2026-01-01".
+    See https://shopify.dev/docs/api/usage/search-syntax.
+    Omitted (None) means no filtering.
+    """
     client = ShopifyGraphQLClient(store)
-    data = client.execute(LIST_ORDERS_QUERY, {"first": first, "after": after})
+    data = client.execute(LIST_ORDERS_QUERY, {"first": first, "after": after, "query": query})
     connection = data["orders"]
     orders = [_parse_order(edge["node"]) for edge in connection["edges"]]
-    page_info = connection["pageInfo"]
-    return OrderPage(
-        orders=orders,
-        has_next_page=page_info["hasNextPage"],
-        end_cursor=page_info.get("endCursor"),
+    has_next_page, end_cursor = parse_page_info(connection)
+    return OrderPage(orders=orders, has_next_page=has_next_page, end_cursor=end_cursor)
+
+
+def iter_all_orders(
+    store: ShopifyStore, *, batch_size: int = 50, query: str | None = None
+) -> Iterator[Order]:
+    """Yield every order for a store (optionally filtered by `query`, same syntax as
+    list_orders), fetching subsequent pages automatically."""
+    return iter_pages(
+        lambda after: list_orders(store, first=batch_size, after=after, query=query),
+        lambda page: page.orders,
     )
-
-
-def iter_all_orders(store: ShopifyStore, *, batch_size: int = 50) -> Iterator[Order]:
-    """Yield every order for a store, fetching subsequent pages automatically."""
-    after = None
-    while True:
-        page = list_orders(store, first=batch_size, after=after)
-        yield from page.orders
-        if not page.has_next_page:
-            return
-        after = page.end_cursor
 
 
 def get_order(store: ShopifyStore, order_id: str) -> Order | None:
@@ -107,7 +107,7 @@ def update_order(store: ShopifyStore, *, order_id: str, **fields) -> Order:
     input_payload = camelize_keys({"id": order_id, **fields})
     data = client.execute(UPDATE_ORDER_MUTATION, {"input": input_payload})
     result = data["orderUpdate"]
-    _raise_for_user_errors(result["userErrors"])
+    raise_for_user_errors(result["userErrors"])
     return _parse_order(result["order"])
 
 
@@ -137,5 +137,5 @@ def update_fulfillment_status(
         }
     data = client.execute(FULFILL_ORDER_MUTATION, {"fulfillment": fulfillment_input})
     result = data["fulfillmentCreateV2"]
-    _raise_for_user_errors(result["userErrors"])
+    raise_for_user_errors(result["userErrors"])
     return _parse_order(result["fulfillment"]["order"])

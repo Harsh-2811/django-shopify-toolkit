@@ -12,6 +12,7 @@ from typing import BinaryIO
 
 import requests
 
+from .._utils import raise_for_user_errors
 from ..client import ShopifyGraphQLClient
 from ..conf import get_request_timeout
 from ..exceptions import ShopifyUserError
@@ -41,14 +42,6 @@ def _parse_image(node: dict) -> ProductImage:
     return ProductImage(id=node["id"], url=image.get("url"), alt_text=node.get("alt"))
 
 
-def _raise_for_media_user_errors(media_user_errors: list) -> None:
-    if media_user_errors:
-        raise ShopifyUserError(
-            f"Shopify returned mediaUserErrors: {media_user_errors}",
-            user_errors=media_user_errors,
-        )
-
-
 def list_product_images(store: ShopifyStore, product_id: str, *, first: int = 50) -> list[ProductImage]:
     """List image-type media attached to a product (videos/3D models excluded)."""
     client = ShopifyGraphQLClient(store)
@@ -71,7 +64,7 @@ def add_product_image(
         ADD_PRODUCT_IMAGE_MUTATION, {"productId": product_id, "media": [media_input]}
     )
     result = data["productCreateMedia"]
-    _raise_for_media_user_errors(result["mediaUserErrors"])
+    raise_for_user_errors(result["mediaUserErrors"], kind="mediaUserErrors")
     media_list = result["media"]
     if not media_list:
         raise ShopifyUserError("productCreateMedia returned no media", user_errors=[])
@@ -85,7 +78,7 @@ def remove_product_image(store: ShopifyStore, product_id: str, image_id: str) ->
         REMOVE_PRODUCT_IMAGE_MUTATION, {"productId": product_id, "mediaIds": [image_id]}
     )
     result = data["productDeleteMedia"]
-    _raise_for_media_user_errors(result["mediaUserErrors"])
+    raise_for_user_errors(result["mediaUserErrors"], kind="mediaUserErrors")
     deleted = result["deletedMediaIds"]
     return deleted[0] if deleted else image_id
 
@@ -105,7 +98,7 @@ def reorder_product_images(store: ShopifyStore, product_id: str, image_ids_in_or
         REORDER_PRODUCT_IMAGES_MUTATION, {"productId": product_id, "moves": moves}
     )
     result = data["productReorderMedia"]
-    _raise_for_media_user_errors(result["mediaUserErrors"])
+    raise_for_user_errors(result["mediaUserErrors"], kind="mediaUserErrors")
 
 
 def upload_product_image_file(
@@ -159,7 +152,7 @@ def upload_product_image_file(
     }
     data = client.execute(STAGED_UPLOADS_CREATE_MUTATION, {"input": [staged_input]})
     target_data = data.get("stagedUploadsCreate") or {}
-    _raise_for_media_user_errors(target_data.get("userErrors", []))
+    raise_for_user_errors(target_data.get("userErrors", []))
 
     targets = target_data.get("stagedTargets") or []
     if not targets:
