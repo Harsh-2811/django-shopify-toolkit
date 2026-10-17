@@ -4,9 +4,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Iterator
 
-from .._utils import camelize_keys
+from .._utils import camelize_keys, iter_pages, parse_page_info, raise_for_user_errors
 from ..client import ShopifyGraphQLClient
-from ..exceptions import ShopifyUserError
 from ..models import ShopifyStore
 from .queries import (
     CREATE_CUSTOMER_MUTATION,
@@ -49,13 +48,6 @@ def _parse_customer(node: dict) -> Customer:
     )
 
 
-def _raise_for_user_errors(user_errors: list) -> None:
-    if user_errors:
-        raise ShopifyUserError(
-            f"Shopify returned userErrors: {user_errors}", user_errors=user_errors
-        )
-
-
 def list_customers(
     store: ShopifyStore,
     *,
@@ -74,12 +66,8 @@ def list_customers(
     data = client.execute(LIST_CUSTOMERS_QUERY, {"first": first, "after": after, "query": query})
     connection = data["customers"]
     customers = [_parse_customer(edge["node"]) for edge in connection["edges"]]
-    page_info = connection["pageInfo"]
-    return CustomerPage(
-        customers=customers,
-        has_next_page=page_info["hasNextPage"],
-        end_cursor=page_info.get("endCursor"),
-    )
+    has_next_page, end_cursor = parse_page_info(connection)
+    return CustomerPage(customers=customers, has_next_page=has_next_page, end_cursor=end_cursor)
 
 
 def iter_all_customers(
@@ -87,13 +75,10 @@ def iter_all_customers(
 ) -> Iterator[Customer]:
     """Yield every customer for a store (optionally filtered by `query`, same syntax as
     list_customers), fetching subsequent pages automatically."""
-    after = None
-    while True:
-        page = list_customers(store, first=batch_size, after=after, query=query)
-        yield from page.customers
-        if not page.has_next_page:
-            return
-        after = page.end_cursor
+    return iter_pages(
+        lambda after: list_customers(store, first=batch_size, after=after, query=query),
+        lambda page: page.customers,
+    )
 
 
 def get_customer(store: ShopifyStore, customer_id: str) -> Customer | None:
@@ -117,7 +102,7 @@ def create_customer(store: ShopifyStore, **fields) -> Customer:
     input_payload = camelize_keys(fields)
     data = client.execute(CREATE_CUSTOMER_MUTATION, {"input": input_payload})
     result = data["customerCreate"]
-    _raise_for_user_errors(result["userErrors"])
+    raise_for_user_errors(result["userErrors"])
     return _parse_customer(result["customer"])
 
 
@@ -131,7 +116,7 @@ def update_customer(store: ShopifyStore, *, customer_id: str, **fields) -> Custo
     input_payload = camelize_keys({"id": customer_id, **fields})
     data = client.execute(UPDATE_CUSTOMER_MUTATION, {"input": input_payload})
     result = data["customerUpdate"]
-    _raise_for_user_errors(result["userErrors"])
+    raise_for_user_errors(result["userErrors"])
     return _parse_customer(result["customer"])
 
 
@@ -144,5 +129,5 @@ def delete_customer(store: ShopifyStore, customer_id: str) -> str:
     client = ShopifyGraphQLClient(store)
     data = client.execute(DELETE_CUSTOMER_MUTATION, {"input": {"id": customer_id}})
     result = data["customerDelete"]
-    _raise_for_user_errors(result["userErrors"])
+    raise_for_user_errors(result["userErrors"])
     return result["deletedCustomerId"]

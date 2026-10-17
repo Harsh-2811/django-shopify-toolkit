@@ -13,6 +13,21 @@ All notable changes to this project are documented in this file.
 - `delete_customer(store, customer_id)` and
   `DELETE /api/stores/<store_pk>/customers/<pk>/`.
 
+### Changed
+- Internal: the per-module `_raise_for_user_errors`/`_raise_for_media_user_errors`
+  helpers, the inline `userErrors` checks in bulk operations and webhooks, and
+  the three hand-rolled `iter_all_*` pagination loops are consolidated into
+  `_utils` (`raise_for_user_errors`, `parse_page_info`, `iter_pages`). No
+  public API change.
+
+### Fixed
+- `iter_all_products`/`iter_all_orders`/`iter_all_customers` raise
+  `ShopifyToolkitError` instead of looping forever if Shopify reports
+  `hasNextPage: true` with a missing or repeated `endCursor`.
+- The `stagedUploadsCreate` failure message in `upload_product_image_file`
+  said `mediaUserErrors`; it's that mutation's `userErrors` field, and the
+  message now says so.
+
 ## [1.1.0] - Unreleased
 
 ### Added

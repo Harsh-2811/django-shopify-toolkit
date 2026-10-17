@@ -15,9 +15,10 @@ from dataclasses import dataclass
 
 import requests
 
+from .._utils import raise_for_user_errors
 from ..client import ShopifyGraphQLClient
 from ..conf import get_request_timeout
-from ..exceptions import ShopifyToolkitError, ShopifyUserError
+from ..exceptions import ShopifyToolkitError
 from ..models import ShopifyStore
 from .mutations import RUN_BULK_QUERY_MUTATION
 from .queries import CURRENT_BULK_OPERATION_QUERY
@@ -61,11 +62,7 @@ def run_bulk_query(store: ShopifyStore, query: str) -> BulkOperation:
     client = ShopifyGraphQLClient(store)
     data = client.execute(RUN_BULK_QUERY_MUTATION, {"query": query})
     result = data["bulkOperationRunQuery"]
-    if result["userErrors"]:
-        raise ShopifyUserError(
-            f"Shopify returned userErrors: {result['userErrors']}",
-            user_errors=result["userErrors"],
-        )
+    raise_for_user_errors(result["userErrors"])
     return _parse_bulk_operation(result["bulkOperation"])
 
 

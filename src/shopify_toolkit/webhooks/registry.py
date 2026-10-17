@@ -6,8 +6,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from .._utils import raise_for_user_errors
 from ..client import ShopifyGraphQLClient
-from ..exceptions import ShopifyUserError
 from ..models import ShopifyStore
 
 REGISTER_WEBHOOK_MUTATION = """
@@ -71,11 +71,7 @@ def register_webhook(store: ShopifyStore, *, topic: str, callback_url: str) -> W
         },
     )
     result = data["webhookSubscriptionCreate"]
-    if result["userErrors"]:
-        raise ShopifyUserError(
-            f"Shopify returned userErrors: {result['userErrors']}",
-            user_errors=result["userErrors"],
-        )
+    raise_for_user_errors(result["userErrors"])
     return _parse_subscription(result["webhookSubscription"])
 
 

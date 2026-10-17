@@ -11,7 +11,7 @@ directly.
 from dataclasses import dataclass, field
 from typing import Any, Iterator, Literal, Sequence
 
-from .._utils import camelize_keys
+from .._utils import camelize_keys, iter_pages, parse_page_info, raise_for_user_errors
 from ..client import ShopifyGraphQLClient
 from ..exceptions import ShopifyUserError
 from ..models import ShopifyStore
@@ -187,13 +187,6 @@ def _parse_product(node: dict) -> Product:
     )
 
 
-def _raise_for_user_errors(user_errors: list) -> None:
-    if user_errors:
-        raise ShopifyUserError(
-            f"Shopify returned userErrors: {user_errors}", user_errors=user_errors
-        )
-
-
 # ==============================================================================
 # Products CRUD & Iterators
 # ==============================================================================
@@ -216,12 +209,8 @@ def list_products(
     data = client.execute(LIST_PRODUCTS_QUERY, {"first": first, "after": after, "query": query})
     connection = data["products"]
     products = [_parse_product(edge["node"]) for edge in connection["edges"]]
-    page_info = connection["pageInfo"]
-    return ProductPage(
-        products=products,
-        has_next_page=page_info["hasNextPage"],
-        end_cursor=page_info.get("endCursor"),
-    )
+    has_next_page, end_cursor = parse_page_info(connection)
+    return ProductPage(products=products, has_next_page=has_next_page, end_cursor=end_cursor)
 
 
 def iter_all_products(
@@ -229,13 +218,10 @@ def iter_all_products(
 ) -> Iterator[Product]:
     """Yield every product for a store (optionally filtered by `query`, same syntax as
     list_products), fetching subsequent pages automatically."""
-    after = None
-    while True:
-        page = list_products(store, first=batch_size, after=after, query=query)
-        yield from page.products
-        if not page.has_next_page:
-            return
-        after = page.end_cursor
+    return iter_pages(
+        lambda after: list_products(store, first=batch_size, after=after, query=query),
+        lambda page: page.products,
+    )
 
 
 def get_product(store: ShopifyStore, product_id: str) -> Product | None:
@@ -258,7 +244,7 @@ def create_product(
     input_payload = camelize_keys({"title": title, **fields})
     data = client.execute(CREATE_PRODUCT_MUTATION, {"input": input_payload})
     result = data["productCreate"]
-    _raise_for_user_errors(result["userErrors"])
+    raise_for_user_errors(result["userErrors"])
     return _parse_product(result["product"])
 
 
@@ -272,7 +258,7 @@ def update_product(
     input_payload = camelize_keys({"id": product_id, **fields})
     data = client.execute(UPDATE_PRODUCT_MUTATION, {"input": input_payload})
     result = data["productUpdate"]
-    _raise_for_user_errors(result["userErrors"])
+    raise_for_user_errors(result["userErrors"])
     return _parse_product(result["product"])
 
 
@@ -281,7 +267,7 @@ def delete_product(store: ShopifyStore, product_id: str) -> str:
     client = ShopifyGraphQLClient(store)
     data = client.execute(DELETE_PRODUCT_MUTATION, {"input": {"id": product_id}})
     result = data["productDelete"]
-    _raise_for_user_errors(result["userErrors"])
+    raise_for_user_errors(result["userErrors"])
     return result["deletedProductId"]
 
 
@@ -518,7 +504,7 @@ def bulk_create_variants(
         {"productId": product_id, "variants": payload},
     )
     res = data.get("productVariantsBulkCreate") or {}
-    _raise_for_user_errors(res.get("userErrors", []))
+    raise_for_user_errors(res.get("userErrors", []))
     return [_parse_variant(v_node, product_id=product_id) for v_node in res.get("productVariants") or []]
 
 
@@ -581,7 +567,7 @@ def bulk_update_variants(
         {"productId": product_id, "variants": payload},
     )
     res = data.get("productVariantsBulkUpdate") or {}
-    _raise_for_user_errors(res.get("userErrors", []))
+    raise_for_user_errors(res.get("userErrors", []))
     return [_parse_variant(v_node, product_id=product_id) for v_node in res.get("productVariants") or []]
 
 
@@ -596,7 +582,7 @@ def delete_product_variants(
         {"productId": product_id, "variantsIds": list(variant_ids)},
     )
     res = data.get("productVariantsBulkDelete") or {}
-    _raise_for_user_errors(res.get("userErrors", []))
+    raise_for_user_errors(res.get("userErrors", []))
 
 
 # ==============================================================================
@@ -622,7 +608,7 @@ def create_product_option(
         {"productId": product_id, "options": options_input},
     )
     res = data.get("productOptionsCreate") or {}
-    _raise_for_user_errors(res.get("userErrors", []))
+    raise_for_user_errors(res.get("userErrors", []))
     opts = res.get("product", {}).get("options") or []
     for opt in opts:
         if opt.get("name") == name:
@@ -659,7 +645,7 @@ def update_product_option(
         },
     )
     res = data.get("productOptionUpdate") or {}
-    _raise_for_user_errors(res.get("userErrors", []))
+    raise_for_user_errors(res.get("userErrors", []))
     opts = res.get("product", {}).get("options") or []
     for opt in opts:
         if opt.get("id") == option_id:
@@ -681,5 +667,5 @@ def delete_product_option(
         {"productId": product_id, "options": [option_id]},
     )
     res = data.get("productOptionsDelete") or {}
-    _raise_for_user_errors(res.get("userErrors", []))
+    raise_for_user_errors(res.get("userErrors", []))
     return res.get("deletedOptionsIds") or [option_id]
