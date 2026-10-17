@@ -545,8 +545,16 @@ GET/POST   /api/stores/<store_pk>/customers/
 GET/PUT/PATCH/DELETE  /api/stores/<store_pk>/customers/<pk>/
 ```
 
-Every list endpoint accepts `?first=`, `?after=` (cursor), and `?query=` (Shopify search syntax,
+Every list endpoint accepts `?first=` (1–250, default 50), `?after=` (cursor), and `?query=` (Shopify search syntax,
 e.g. `/api/stores/1/orders/?query=financial_status:paid`).
+
+Errors: an unknown or inactive `store_pk` returns **404**; an invalid `?first=` returns **400**;
+and when Shopify rejects the input (a `ShopifyUserError` — e.g. deleting a customer who has
+orders) the response is **400** with Shopify's errors under `user_errors`:
+
+```json
+{"detail": "Shopify rejected the request.", "user_errors": [{"field": ["id"], "message": "..."}]}
+```
 
 **These viewsets ship with no `authentication_classes`/`permission_classes` set — they inherit
 whatever `DEFAULT_AUTHENTICATION_CLASSES`/`DEFAULT_PERMISSION_CLASSES` your project's own
