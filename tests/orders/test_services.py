@@ -1,3 +1,5 @@
+import json
+
 import pytest
 import responses
 
@@ -216,3 +218,27 @@ def test_iter_all_orders_fetches_every_page(shopify_store):
 
     assert ids == ["gid://shopify/Order/1", "gid://shopify/Order/2"]
     assert len(responses.calls) == 2
+
+
+@responses.activate
+@pytest.mark.django_db
+def test_list_orders_passes_search_query_variable(shopify_store):
+    responses.add(
+        responses.POST,
+        ENDPOINT,
+        json={
+            "data": {
+                "orders": {
+                    "edges": [{"cursor": "c1", "node": _order_node()}],
+                    "pageInfo": {"hasNextPage": False, "endCursor": "c1"},
+                }
+            }
+        },
+        status=200,
+    )
+
+    services.list_orders(shopify_store, query="financial_status:paid")
+
+    body = json.loads(responses.calls[0].request.body)
+    assert body["variables"]["query"] == "financial_status:paid"
+    assert "query: $query" in body["query"]

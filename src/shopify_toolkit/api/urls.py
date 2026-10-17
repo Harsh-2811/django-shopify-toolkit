@@ -20,7 +20,9 @@ order_detail = OrderViewSet.as_view({"get": "retrieve"})
 order_fulfill = OrderViewSet.as_view({"post": "fulfill"})
 
 customer_list = CustomerViewSet.as_view({"get": "list", "post": "create"})
-customer_detail = CustomerViewSet.as_view({"get": "retrieve", "put": "update", "patch": "update"})
+customer_detail = CustomerViewSet.as_view(
+    {"get": "retrieve", "put": "update", "patch": "update", "delete": "destroy"}
+)
 
 urlpatterns = [
     path("stores/<int:store_pk>/products/", product_list, name="product-list"),

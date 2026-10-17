@@ -25,8 +25,8 @@ fragment OrderFields on Order {
 LIST_ORDERS_QUERY = (
     ORDER_FIELDS_FRAGMENT
     + """
-query ListOrders($first: Int!, $after: String) {
-    orders(first: $first, after: $after) {
+query ListOrders($first: Int!, $after: String, $query: String) {
+    orders(first: $first, after: $after, query: $query) {
         edges {
             cursor
             node {

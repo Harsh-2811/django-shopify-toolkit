@@ -2,6 +2,17 @@
 
 All notable changes to this project are documented in this file.
 
+## [Unreleased]
+
+### Added
+- `query=` filter on `list_products`/`list_orders`/`list_customers` and
+  their `iter_all_*` counterparts, passed through as Shopify's search syntax
+  (e.g. `query="tag:vip"`). Also exposed as `?query=` on the REST list
+  endpoints. Defaults to `None` (no filtering), so existing calls are
+  unchanged.
+- `delete_customer(store, customer_id)` and
+  `DELETE /api/stores/<store_pk>/customers/<pk>/`.
+
 ## [1.1.0] - Unreleased
 
 ### Added

@@ -198,10 +198,22 @@ def _raise_for_user_errors(user_errors: list) -> None:
 # Products CRUD & Iterators
 # ==============================================================================
 
-def list_products(store: ShopifyStore, *, first: int = 50, after: str | None = None) -> ProductPage:
-    """List products for a store, paginated."""
+def list_products(
+    store: ShopifyStore,
+    *,
+    first: int = 50,
+    after: str | None = None,
+    query: str | None = None,
+) -> ProductPage:
+    """List products for a store, paginated.
+
+    `query` is passed through as Shopify's search syntax, e.g.
+    "status:active vendor:Acme" or "tag:sale".
+    See https://shopify.dev/docs/api/usage/search-syntax.
+    Omitted (None) means no filtering.
+    """
     client = ShopifyGraphQLClient(store)
-    data = client.execute(LIST_PRODUCTS_QUERY, {"first": first, "after": after})
+    data = client.execute(LIST_PRODUCTS_QUERY, {"first": first, "after": after, "query": query})
     connection = data["products"]
     products = [_parse_product(edge["node"]) for edge in connection["edges"]]
     page_info = connection["pageInfo"]
@@ -212,11 +224,14 @@ def list_products(store: ShopifyStore, *, first: int = 50, after: str | None = N
     )
 
 
-def iter_all_products(store: ShopifyStore, *, batch_size: int = 50) -> Iterator[Product]:
-    """Yield every product for a store, fetching subsequent pages automatically."""
+def iter_all_products(
+    store: ShopifyStore, *, batch_size: int = 50, query: str | None = None
+) -> Iterator[Product]:
+    """Yield every product for a store (optionally filtered by `query`, same syntax as
+    list_products), fetching subsequent pages automatically."""
     after = None
     while True:
-        page = list_products(store, first=batch_size, after=after)
+        page = list_products(store, first=batch_size, after=after, query=query)
         yield from page.products
         if not page.has_next_page:
             return

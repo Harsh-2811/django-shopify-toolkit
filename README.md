@@ -359,6 +359,15 @@ customer = customers.create_customer(
 
 # List Customers
 cust_page = customers.list_customers(store, first=30)
+
+# Filter with Shopify's search syntax (https://shopify.dev/docs/api/usage/search-syntax).
+# Every list_* and iter_all_* function (products, orders, customers) accepts query=.
+vips = customers.list_customers(store, query="tag:vip")
+for order in orders.iter_all_orders(store, query="financial_status:paid created_at:>=2026-01-01"):
+    ...
+
+# Delete Customers (Shopify refuses customers with orders -> ShopifyUserError)
+customers.delete_customer(store, "gid://shopify/Customer/123")
 ```
 
 ---
@@ -533,8 +542,11 @@ GET        /api/stores/<store_pk>/orders/
 GET        /api/stores/<store_pk>/orders/<pk>/
 POST       /api/stores/<store_pk>/orders/<pk>/fulfill/
 GET/POST   /api/stores/<store_pk>/customers/
-GET/PUT/PATCH  /api/stores/<store_pk>/customers/<pk>/
+GET/PUT/PATCH/DELETE  /api/stores/<store_pk>/customers/<pk>/
 ```
+
+Every list endpoint accepts `?first=`, `?after=` (cursor), and `?query=` (Shopify search syntax,
+e.g. `/api/stores/1/orders/?query=financial_status:paid`).
 
 **These viewsets ship with no `authentication_classes`/`permission_classes` set — they inherit
 whatever `DEFAULT_AUTHENTICATION_CLASSES`/`DEFAULT_PERMISSION_CLASSES` your project's own

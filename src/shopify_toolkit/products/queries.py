@@ -72,8 +72,8 @@ fragment ProductFields on Product {
 LIST_PRODUCTS_QUERY = (
     PRODUCT_FIELDS_FRAGMENT
     + """
-query ListProducts($first: Int!, $after: String) {
-    products(first: $first, after: $after) {
+query ListProducts($first: Int!, $after: String, $query: String) {
+    products(first: $first, after: $after, query: $query) {
         edges {
             cursor
             node {

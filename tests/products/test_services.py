@@ -1,3 +1,5 @@
+import json
+
 import pytest
 import responses
 
@@ -506,3 +508,27 @@ def test_parse_variant_legacy_fallback_fields():
     assert variant.weight == 2.5
     assert variant.weight_unit == "POUNDS"
     assert variant.requires_shipping is False
+
+
+@responses.activate
+@pytest.mark.django_db
+def test_list_products_passes_search_query_variable(shopify_store):
+    responses.add(
+        responses.POST,
+        ENDPOINT,
+        json={
+            "data": {
+                "products": {
+                    "edges": [{"cursor": "c1", "node": _sample_product_node()}],
+                    "pageInfo": {"hasNextPage": False, "endCursor": "c1"},
+                }
+            }
+        },
+        status=200,
+    )
+
+    services.list_products(shopify_store, query="status:active vendor:Acme")
+
+    body = json.loads(responses.calls[0].request.body)
+    assert body["variables"]["query"] == "status:active vendor:Acme"
+    assert "query: $query" in body["query"]

@@ -62,10 +62,22 @@ def _raise_for_user_errors(user_errors: list) -> None:
         )
 
 
-def list_orders(store: ShopifyStore, *, first: int = 50, after: str | None = None) -> OrderPage:
-    """List orders for a store, paginated."""
+def list_orders(
+    store: ShopifyStore,
+    *,
+    first: int = 50,
+    after: str | None = None,
+    query: str | None = None,
+) -> OrderPage:
+    """List orders for a store, paginated.
+
+    `query` is passed through as Shopify's search syntax, e.g.
+    "financial_status:paid created_at:>=2026-01-01".
+    See https://shopify.dev/docs/api/usage/search-syntax.
+    Omitted (None) means no filtering.
+    """
     client = ShopifyGraphQLClient(store)
-    data = client.execute(LIST_ORDERS_QUERY, {"first": first, "after": after})
+    data = client.execute(LIST_ORDERS_QUERY, {"first": first, "after": after, "query": query})
     connection = data["orders"]
     orders = [_parse_order(edge["node"]) for edge in connection["edges"]]
     page_info = connection["pageInfo"]
@@ -76,11 +88,14 @@ def list_orders(store: ShopifyStore, *, first: int = 50, after: str | None = Non
     )
 
 
-def iter_all_orders(store: ShopifyStore, *, batch_size: int = 50) -> Iterator[Order]:
-    """Yield every order for a store, fetching subsequent pages automatically."""
+def iter_all_orders(
+    store: ShopifyStore, *, batch_size: int = 50, query: str | None = None
+) -> Iterator[Order]:
+    """Yield every order for a store (optionally filtered by `query`, same syntax as
+    list_orders), fetching subsequent pages automatically."""
     after = None
     while True:
-        page = list_orders(store, first=batch_size, after=after)
+        page = list_orders(store, first=batch_size, after=after, query=query)
         yield from page.orders
         if not page.has_next_page:
             return

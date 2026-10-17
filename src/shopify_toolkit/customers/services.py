@@ -10,6 +10,7 @@ from ..exceptions import ShopifyUserError
 from ..models import ShopifyStore
 from .queries import (
     CREATE_CUSTOMER_MUTATION,
+    DELETE_CUSTOMER_MUTATION,
     GET_CUSTOMER_QUERY,
     LIST_CUSTOMERS_QUERY,
     UPDATE_CUSTOMER_MUTATION,
@@ -55,10 +56,22 @@ def _raise_for_user_errors(user_errors: list) -> None:
         )
 
 
-def list_customers(store: ShopifyStore, *, first: int = 50, after: str | None = None) -> CustomerPage:
-    """List customers for a store, paginated."""
+def list_customers(
+    store: ShopifyStore,
+    *,
+    first: int = 50,
+    after: str | None = None,
+    query: str | None = None,
+) -> CustomerPage:
+    """List customers for a store, paginated.
+
+    `query` is passed through as Shopify's search syntax, e.g.
+    "email:ada@example.com" or "tag:vip".
+    See https://shopify.dev/docs/api/usage/search-syntax.
+    Omitted (None) means no filtering.
+    """
     client = ShopifyGraphQLClient(store)
-    data = client.execute(LIST_CUSTOMERS_QUERY, {"first": first, "after": after})
+    data = client.execute(LIST_CUSTOMERS_QUERY, {"first": first, "after": after, "query": query})
     connection = data["customers"]
     customers = [_parse_customer(edge["node"]) for edge in connection["edges"]]
     page_info = connection["pageInfo"]
@@ -69,11 +82,14 @@ def list_customers(store: ShopifyStore, *, first: int = 50, after: str | None = 
     )
 
 
-def iter_all_customers(store: ShopifyStore, *, batch_size: int = 50) -> Iterator[Customer]:
-    """Yield every customer for a store, fetching subsequent pages automatically."""
+def iter_all_customers(
+    store: ShopifyStore, *, batch_size: int = 50, query: str | None = None
+) -> Iterator[Customer]:
+    """Yield every customer for a store (optionally filtered by `query`, same syntax as
+    list_customers), fetching subsequent pages automatically."""
     after = None
     while True:
-        page = list_customers(store, first=batch_size, after=after)
+        page = list_customers(store, first=batch_size, after=after, query=query)
         yield from page.customers
         if not page.has_next_page:
             return
@@ -117,3 +133,16 @@ def update_customer(store: ShopifyStore, *, customer_id: str, **fields) -> Custo
     result = data["customerUpdate"]
     _raise_for_user_errors(result["userErrors"])
     return _parse_customer(result["customer"])
+
+
+def delete_customer(store: ShopifyStore, customer_id: str) -> str:
+    """Delete a customer. Returns the deleted customer's GraphQL ID.
+
+    Shopify refuses to delete a customer who has placed orders — that surfaces as
+    ShopifyUserError, not a silent no-op.
+    """
+    client = ShopifyGraphQLClient(store)
+    data = client.execute(DELETE_CUSTOMER_MUTATION, {"input": {"id": customer_id}})
+    result = data["customerDelete"]
+    _raise_for_user_errors(result["userErrors"])
+    return result["deletedCustomerId"]
