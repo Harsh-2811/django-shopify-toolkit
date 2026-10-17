@@ -23,7 +23,8 @@ All notable changes to this project are documented in this file.
 ### Fixed
 - `iter_all_products`/`iter_all_orders`/`iter_all_customers` raise
   `ShopifyToolkitError` instead of looping forever if Shopify reports
-  `hasNextPage: true` with a missing or repeated `endCursor`.
+  `hasNextPage: true` with a missing `endCursor`, or one already visited
+  (including a cycle back to an earlier page).
 - The `stagedUploadsCreate` failure message in `upload_product_image_file`
   said `mediaUserErrors`; it's that mutation's `userErrors` field, and the
   message now says so.

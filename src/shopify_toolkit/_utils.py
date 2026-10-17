@@ -59,17 +59,20 @@ def iter_pages(
     `fetch_page(after)` returns one page (anything with has_next_page/end_cursor, e.g.
     ProductPage); `items(page)` picks that page's items out of it. Raises
     ShopifyToolkitError rather than looping forever if Shopify ever reports another page
-    without a usable cursor to reach it.
+    without a usable cursor to reach it — missing, or one already visited (including a
+    longer cycle like A -> B -> A, not just the same cursor twice in a row).
     """
     after = None
+    seen: set[str] = set()
     while True:
         page = fetch_page(after)
         yield from items(page)
         if not page.has_next_page:
             return
-        if not page.end_cursor or page.end_cursor == after:
+        if not page.end_cursor or page.end_cursor in seen:
             raise ShopifyToolkitError(
-                f"Shopify reported hasNextPage=true but endCursor={page.end_cursor!r}; "
-                "stopping instead of re-fetching the same page forever"
+                f"Shopify reported hasNextPage=true but endCursor={page.end_cursor!r} is "
+                "missing or already visited; stopping instead of looping forever"
             )
+        seen.add(page.end_cursor)
         after = page.end_cursor

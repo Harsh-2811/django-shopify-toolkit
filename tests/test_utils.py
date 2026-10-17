@@ -117,3 +117,19 @@ def test_iter_pages_raises_instead_of_looping_on_repeated_cursor():
     with pytest.raises(ShopifyToolkitError):
         list(iter_pages(listing.fetch, lambda page: page.things))
     assert listing.calls == [None, "c1"]
+
+
+
+def test_iter_pages_raises_on_cursor_cycle_back_to_earlier_page():
+    """A -> B -> A must also stop, not just the same cursor twice in a row."""
+    listing = _FakeListing(
+        {
+            None: _Page([1], True, "c1"),
+            "c1": _Page([2], True, "c2"),
+            "c2": _Page([3], True, "c1"),
+        }
+    )
+
+    with pytest.raises(ShopifyToolkitError, match="already visited"):
+        list(iter_pages(listing.fetch, lambda page: page.things))
+    assert listing.calls == [None, "c1", "c2"]

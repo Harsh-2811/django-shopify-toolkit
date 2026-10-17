@@ -242,3 +242,28 @@ def test_list_orders_passes_search_query_variable(shopify_store):
     body = json.loads(responses.calls[0].request.body)
     assert body["variables"]["query"] == "financial_status:paid"
     assert "query: $query" in body["query"]
+
+
+
+@responses.activate
+@pytest.mark.django_db
+def test_iter_all_orders_forwards_query_to_every_page(shopify_store):
+    def page(node_id, *, has_next_page, end_cursor):
+        return {
+            "data": {
+                "orders": {
+                    "edges": [{"cursor": node_id, "node": _order_node(id=node_id)}],
+                    "pageInfo": {"hasNextPage": has_next_page, "endCursor": end_cursor},
+                }
+            }
+        }
+
+    responses.add(responses.POST, ENDPOINT, json=page("gid://shopify/Order/1", has_next_page=True, end_cursor="c1"), status=200)
+    responses.add(responses.POST, ENDPOINT, json=page("gid://shopify/Order/2", has_next_page=False, end_cursor=None), status=200)
+
+    ids = [item.id for item in services.iter_all_orders(shopify_store, query="tag:sale")]
+
+    assert ids == ["gid://shopify/Order/1", "gid://shopify/Order/2"]
+    variables = [json.loads(call.request.body)["variables"] for call in responses.calls]
+    assert [v["query"] for v in variables] == ["tag:sale", "tag:sale"]
+    assert [v["after"] for v in variables] == [None, "c1"]
